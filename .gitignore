@@ -1,0 +1,13 @@
+# Credentials and Environment
+.env
+
+# Python Cache and Environments
+__pycache__/
+.pytest_cache/
+venv/
+*.pyc
+
+# Local Test Reports and Network Logs
+logs/
+reports/
+*.html
