@@ -1,0 +1,9 @@
+{
+  "questionText": "Do you participate in regular exercises?",
+  "options": [
+    { "optionId": 1, "displayName": "Daily", "optionName": "Active" },
+    { "optionId": 2, "displayName": "Weekly", "optionName": "Moderate" },
+    { "optionId": 3, "displayName": "Never", "optionName": "Sedentary" }
+  ],
+  "isActive": true
+}

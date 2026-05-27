@@ -1,0 +1,9 @@
+{
+  "clientId": "919573464433",
+  "clientType": "RETAIL_INDIVIDUAL",
+  "requestType": "SAVEPOLICY",
+  "otherInformation": {
+    "insuranceType": "Life Insurance",
+    "productSubType": "Term Life"
+  }
+}

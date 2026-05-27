@@ -1,0 +1,10 @@
+{
+  "clientId": "919573464433",
+  "gender": "MALE",
+  "maritalStatus": "SINGLE",
+  "employmentType": "SALARIED",
+  "annualIncome": 1200000,
+  "hasMedicalHistory": false,
+  "hasLoans": false,
+  "userConsent": true
+}
