@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.agent
-class TestUserGeneralActionsFlow:
+class TestUwAgentUserRmCallback:
     @classmethod
     def setup_class(cls):
         cls.user_name = os.getenv("USER_USERNAME", "919573464433")

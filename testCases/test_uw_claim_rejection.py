@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.claims
-class TestClaimRejectionFlow:
+class TestClaimRejection:
     """
     Test suite for the End-to-End Underwriter Claim REJECTION flow.
     Workflow:

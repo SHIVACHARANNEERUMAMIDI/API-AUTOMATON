@@ -2,7 +2,7 @@ import pytest
 from utilities.api_client import API_CLIENT
 
 @pytest.mark.questions
-class TestQuestionsFlow:
+class TestPreRegistrationQuestionnaire:
     """Verify pre-registration questionnaire public REST endpoints."""
 
     def test_get_questionnaire_categories(self):

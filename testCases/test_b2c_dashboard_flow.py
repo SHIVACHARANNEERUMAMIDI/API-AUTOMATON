@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.b2c
-class TestB2CDashboardFlow:
+class TestB2CDashboard:
     @classmethod
     def setup_class(cls):
         cls.user_name = os.getenv("USER_USERNAME", "9542994704")

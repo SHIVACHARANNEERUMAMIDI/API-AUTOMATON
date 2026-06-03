@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.endorsement
-class TestEndorsementRejectionFlow:
+class TestEndorsementRejection:
     """
     Test suite for the End-to-End Underwriter Endorsement REJECTION flow.
     Workflow:

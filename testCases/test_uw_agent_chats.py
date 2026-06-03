@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.agent
-class TestAgentChatsFlow:
+class TestAgentChats:
     @classmethod
     def setup_class(cls):
         # Load agent/underwriter credentials as agent chats require admin/UW privileges

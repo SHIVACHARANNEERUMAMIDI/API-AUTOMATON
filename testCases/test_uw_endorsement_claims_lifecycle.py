@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.endorsement
-class TestUserToUwEndorsementClaimsFlow:
+class TestEndorsementClaimsLifecycle:
     @classmethod
     def setup_class(cls):
         cls.client_id = os.getenv("TEST_CLIENT_ID", "919573464433")

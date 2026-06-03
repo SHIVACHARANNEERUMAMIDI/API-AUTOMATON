@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.digitization
-class TestUserToUwDigitizationFlow:
+class TestPolicyDigitizationLifecycle:
     """
     Refined User-to-Underwriter Chained Flow:
     1. User uploads document.

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.b2c
-class TestMentalHealthFlow:
+class TestB2CMentalHealth:
     @classmethod
     def setup_class(cls):
         # Load standard user credentials from .env to establish authentication context

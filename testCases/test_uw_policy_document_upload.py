@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.digitization
-class TestSingleUpload:
-    def test_single_upload(self):
+class TestPolicyDocumentUpload:
+    def test_policy_document_upload(self):
         user_name = os.getenv("USER_USERNAME")
         user_pass = os.getenv("USER_PASSWORD")
         client_id = os.getenv("TEST_CLIENT_ID", "919573464433")

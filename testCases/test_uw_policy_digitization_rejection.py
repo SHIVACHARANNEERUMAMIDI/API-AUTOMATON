@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @pytest.mark.digitization
-class TestPolicyDigitalizationRejectionFlow:
+class TestPolicyDigitizationRejection:
     """
     Test suite for the End-to-End Underwriter Policy Digitalization REJECTION flow.
     Workflow:

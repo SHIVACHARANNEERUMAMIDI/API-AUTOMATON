@@ -10,7 +10,7 @@ from underwriter_api.endorsement_actions import submit_endorsement, discover_und
 load_dotenv()
 
 @pytest.mark.endorsement
-class TestEndorsementV2Flow:
+class TestEndorsementLifecycle:
     """
     Modular Endorsement Flow.
     Steps are independent but share ticketId via last_state.json.

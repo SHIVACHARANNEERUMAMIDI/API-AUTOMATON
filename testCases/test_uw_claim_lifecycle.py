@@ -10,7 +10,7 @@ from utilities.state_manager import STATE_FILE
 load_dotenv()
 
 @pytest.mark.claims
-class TestUserToUwClaimsFlow:
+class TestClaimLifecycle:
     @classmethod
     def setup_class(cls):
         cls.client_id = os.getenv("TEST_CLIENT_ID", "919573464433")
