@@ -92,10 +92,8 @@ def get_risk_score(client_id):
     query getPortfolioV2($clientId: String!, $clientType: ClientType!) {
       getPortfolioV2(clientId: $clientId, clientType: $clientType) {
         riskScore {
-          healthInsurance { score status }
-          lifeInsurance { score status }
-          motorInsurance { score status }
-          homeInsurance { score status }
+          healthInsurance { score }
+          lifeInsurance { score }
         }
       }
     }
@@ -164,7 +162,7 @@ def get_logged_in_user_roles():
 def get_insurance_type_data(client_type=None):
     """Fetch insurance type data."""
     query = """
-    query GetInsuranceTypeData($clientType: String) {
+    query GetInsuranceTypeData($clientType: PolicyHolderType) {
       getInsuranceTypeData(clientType: $clientType) {
         id
         productType

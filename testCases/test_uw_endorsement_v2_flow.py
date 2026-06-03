@@ -5,10 +5,11 @@ import os
 from utilities.api_client import API_CLIENT
 from dotenv import load_dotenv
 from utilities.state_manager import save_state, get_state
-from underwriter_api.endorsement_actions import submit_endorsement
+from underwriter_api.endorsement_actions import submit_endorsement, discover_underwriter_ticket_id
 
 load_dotenv()
 
+@pytest.mark.endorsement
 class TestEndorsementV2Flow:
     """
     Modular Endorsement Flow.
@@ -32,7 +33,7 @@ class TestEndorsementV2Flow:
             with open(cls.file_path, "wb") as f:
                 f.write(b"%PDF-1.4 test content")
 
-    def test_step1_user_raises_request(self):
+    def test_user_raises_endorsement_request(self):
         """USER login and fetch policies, then raise endorsement."""
         print(f"\n[STEP 1] Login as USER ({self.user_phone})...")
         API_CLIENT.set_credentials(self.user_phone, self.user_pass)
@@ -46,8 +47,20 @@ class TestEndorsementV2Flow:
         }
         """
         res = API_CLIENT.post_graphql(get_policies_query, {"clientId": self.client_id, "clientType": "INDIVIDUAL"})
-        policies = res.json()["data"]["getPersonalPolicies"]["policies"]
-        policy = policies[0]
+        assert res.status_code == 200, f"Failed to get personal policies: {res.text}"
+        res_json = res.json()
+        assert "data" in res_json, "Response missing 'data'"
+        assert "getPersonalPolicies" in res_json["data"], "Response missing 'getPersonalPolicies'"
+        policies = res_json["data"]["getPersonalPolicies"]["policies"]
+        assert isinstance(policies, list), "Expected 'policies' to be a list"
+        # Prioritize Health Insurance, then Life Insurance, then fallback to first active policy
+        policy = next((p for p in policies if p.get("insuranceType") == "Health Insurance"), None)
+        if not policy:
+            policy = next((p for p in policies if p.get("insuranceType") == "Life Insurance"), None)
+        if not policy:
+            policy = policies[0]
+        assert "id" in policy, "Policy missing 'id'"
+        assert "insuranceType" in policy, "Policy missing 'insuranceType'"
         save_state("policyId", policy["id"])
         save_state("insuranceType", policy["insuranceType"])
 
@@ -69,13 +82,20 @@ class TestEndorsementV2Flow:
             "metadata": {"premiumAmountPaid": "111111111"}
         }
         res = API_CLIENT.post_graphql(mutation, {"input": mutation_input})
-        ticket_id = res.json()["data"]["saveEndorsementData"]["requestTypeId"]
+        assert res.status_code == 200, f"Failed to raise endorsement: {res.text}"
+        res_json = res.json()
+        assert "data" in res_json, "Response missing 'data'"
+        assert "saveEndorsementData" in res_json["data"], "Response missing 'saveEndorsementData'"
+        save_data = res_json["data"]["saveEndorsementData"]
+        assert isinstance(save_data, dict), "Expected saveEndorsementData to be a dict"
+        ticket_id = save_data["requestTypeId"]
+        assert ticket_id is not None, "saveEndorsementData missing 'requestTypeId'"
         
         # SAVE STATE
         save_state("ticketId", ticket_id)
         print(f"Endorsement Raised. Saved Ticket ID to state: {ticket_id}")
 
-    def test_step2_underwriter_processes(self):
+    def test_underwriter_processes_endorsement(self):
         """UNDERWRITER processes the ticket (Can be run independently)."""
         ticket_id = get_state("ticketId")
         policy_id = get_state("policyId")
@@ -86,6 +106,10 @@ class TestEndorsementV2Flow:
 
         print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) for Ticket: {ticket_id}...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
+
+        # Discover correct underwriter-side ticket ID
+        real_ticket_id = discover_underwriter_ticket_id(self.client_id, ticket_id)
+        assert real_ticket_id is not None, f"Could not discover underwriter-side ticket ID for request ID {ticket_id}"
 
         # Build DTO
         request_dto = {
@@ -102,12 +126,15 @@ class TestEndorsementV2Flow:
 
         # Submit using our stabilized action
         res = submit_endorsement(
-            ticket_id=ticket_id,
+            ticket_id=real_ticket_id,
             request_dto=request_dto,
             endorsement_copy_path=self.file_path
         )
 
         assert res.status_code == 200, f"Underwriter submission failed: {res.text}"
+        res_json = res.json()
+        assert isinstance(res_json, dict), "Expected submission response to be a dictionary"
+        assert res_json.get("success") is True, f"Submission success was not True: {res_json}"
         print(f"Endorsement Lifecycle Complete for Ticket {ticket_id}!")
 
 if __name__ == "__main__":

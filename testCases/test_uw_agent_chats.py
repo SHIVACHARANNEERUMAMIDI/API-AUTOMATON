@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+@pytest.mark.agent
 class TestAgentChatsFlow:
     @classmethod
     def setup_class(cls):
@@ -14,7 +15,7 @@ class TestAgentChatsFlow:
         cls.user_name = os.getenv("UW_USERNAME", "403rajeev")
         cls.user_pass = os.getenv("UW_PASSWORD", "Test@1234")
 
-    def test_01_get_agent_chats_list(self):
+    def test_get_agent_chats_list(self):
         """Verify fetching the list of agent chats with paging parameters."""
         print(f"\n[STEP 1] Login as AGENT/UNDERWRITER ({self.user_name})...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
@@ -30,11 +31,16 @@ class TestAgentChatsFlow:
         # Verify the structure is correct (either a list or a paged object dictionary)
         assert isinstance(data, (dict, list)), "Response should be a JSON list or dictionary"
         
-        # If it's a page structure, it might have a "content" field
-        chats = data.get("content", []) if isinstance(data, dict) else data
+        if isinstance(data, dict):
+            assert "content" in data, "Response dictionary missing 'content' key"
+            chats = data["content"]
+            assert isinstance(chats, list), "Expected 'content' to be a list"
+        else:
+            chats = data
+            assert isinstance(chats, list), "Expected response to be a list"
         print(f"Discovered {len(chats)} agent chats in the current page.")
 
-    def test_02_get_agent_chat_by_id(self):
+    def test_get_agent_chat_by_id(self):
         """Verify fetching an agent chat by a specific ID."""
         print(f"\n[STEP 1] Login as AGENT/UNDERWRITER ({self.user_name})...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
@@ -67,6 +73,8 @@ class TestAgentChatsFlow:
         
         if res.status_code == 200:
             chat_detail = res.json()
+            assert isinstance(chat_detail, dict), "Expected chat details to be a dictionary object"
+            assert "id" in chat_detail or "chatId" in chat_detail, "Chat detail missing identifier field"
             print(f"Successfully retrieved chat details:\n{json.dumps(chat_detail, indent=2)}")
         else:
             print(f"Chat ID {chat_id_to_test} was not found on server (404), which is a valid API response for a non-existent ID.")

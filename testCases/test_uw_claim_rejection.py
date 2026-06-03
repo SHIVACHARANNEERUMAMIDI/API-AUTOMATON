@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+@pytest.mark.claims
 class TestClaimRejectionFlow:
     """
     Test suite for the End-to-End Underwriter Claim REJECTION flow.

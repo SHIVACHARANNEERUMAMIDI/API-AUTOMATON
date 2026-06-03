@@ -1,10 +1,11 @@
 import pytest
 from utilities.api_client import API_CLIENT
 
+@pytest.mark.questions
 class TestQuestionsFlow:
     """Verify pre-registration questionnaire public REST endpoints."""
 
-    def test_01_get_questionnaire_categories(self):
+    def test_get_questionnaire_categories(self):
         """Verify that questionnaire categories can be retrieved successfully without authorization."""
         print("\n[STEP 1] Fetching questionnaire categories (public endpoint)...")
         res = API_CLIENT.get_rest("pre-registration-questionnaire/categories", _include_auth=False)
@@ -26,7 +27,7 @@ class TestQuestionsFlow:
         
         print(f"Retrieved {len(categories)} categories successfully. Found key categories: {category_ids}")
 
-    def test_02_get_pre_registration_questionnaire(self):
+    def test_get_pre_registration_questionnaire(self):
         """Verify that questionnaire items can be fetched by category IDs without authorization."""
         print("\n[STEP 1] Fetching questionnaire items for categories C1, C3, C5 (public endpoint)...")
         params = {"categoryIds": "C1,C3,C5"}

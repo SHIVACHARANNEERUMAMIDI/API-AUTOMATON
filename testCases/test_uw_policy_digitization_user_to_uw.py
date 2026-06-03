@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+@pytest.mark.digitization
 class TestUserToUwDigitizationFlow:
     """
     Refined User-to-Underwriter Chained Flow:
@@ -39,7 +40,7 @@ class TestUserToUwDigitizationFlow:
         "Travel Insurance",
         "Home Insurance"
     ])
-    def test_01_user_upload(self, insurance_type):
+    def test_user_upload(self, insurance_type):
         # --- STEP 1: USER SIDE (Upload) ---
         print(f"\n[STEP 1] Login as USER ({self.user_name}) and Uploading Document for {insurance_type}...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
@@ -47,6 +48,8 @@ class TestUserToUwDigitizationFlow:
         # Upload Document
         res = upload_document(self.file_path, self.user_id, request_type="SAVEPOLICY")
         assert res.status_code == 200, f"User upload failed: {res.text}"
+        upload_data = res.json()
+        assert isinstance(upload_data, dict), "Expected upload response to be a dictionary"
         print(f"User side: Document Uploaded Successfully for {insurance_type}.")
 
     @pytest.mark.parametrize("insurance_type", [
@@ -56,7 +59,7 @@ class TestUserToUwDigitizationFlow:
         "Travel Insurance",
         "Home Insurance"
     ])
-    def test_02_uw_verify_and_submit(self, insurance_type):
+    def test_uw_verify_and_submit(self, insurance_type):
         # --- STEP 2: UNDERWRITER SIDE (Search by Client ID) ---
         print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) and Searching for Ticket with Client ID: {self.user_id}")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)

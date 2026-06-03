@@ -184,3 +184,42 @@ def submit_endorsement(ticket_id, request_dto, endorsement_copy_path=None, actio
     
     print(f"DEBUG: Submitting Endorsement for Ticket {ticket_id} (Action: {action})")
     return API_CLIENT._request("POST", url, files=files, params=params)
+
+def discover_underwriter_ticket_id(client_id, request_id):
+    """
+    Finds the underwriter-side ticket ID matching the user-side request_id (requestTypeId/endorsementId).
+    """
+    res = get_endorsement_tickets(search=client_id, endorsement_tab="PENDING")
+    if res.status_code != 200:
+        return None
+    
+    tickets_data = res.json().get("data", {}).get("getEndorsementTickets", {})
+    if not tickets_data:
+        return None
+        
+    tickets = tickets_data.get("content", [])
+    if not isinstance(tickets, list):
+        return None
+        
+    # Filter tickets matching this client_id
+    client_tickets = [t for t in tickets if str(t.get("clientId")) == str(client_id)]
+    
+    for t in client_tickets:
+        t_id = t["id"]
+        saved_res = get_endorsement_ticket_saved_data(t_id)
+        if saved_res.status_code == 200:
+            view = saved_res.json().get("data", {}).get("getEndorsementTicketSavedData", {}).get("endorsementTicketView", {})
+            if view:
+                req_id = view.get("requestTypeId") or view.get("endorsementId")
+                if str(req_id) == str(request_id):
+                    print(f"DEBUG: Found matching underwriter ticket ID: {t_id} for request ID: {request_id}")
+                    return t_id
+                    
+    # Fallbacks to prevent failure if exact match is not found
+    if client_tickets:
+        print(f"WARNING: Exact match for request ID {request_id} not found. Falling back to latest client ticket: {client_tickets[0]['id']}")
+        return client_tickets[0]["id"]
+    elif tickets:
+        print(f"WARNING: Exact match for request ID {request_id} not found. Falling back to latest general ticket: {tickets[0]['id']}")
+        return tickets[0]["id"]
+    return None

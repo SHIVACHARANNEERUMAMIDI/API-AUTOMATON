@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+@pytest.mark.endorsement
 class TestUserToUwEndorsementClaimsFlow:
     @classmethod
     def setup_class(cls):
@@ -22,7 +23,7 @@ class TestUserToUwEndorsementClaimsFlow:
         automation_root = os.path.dirname(current_dir)
         cls.file_path = os.path.join(automation_root, "Data", "GoDigit Health Insurance 2.pdf")
 
-    def test_01_user_raise_endorsement_claim(self):
+    def test_user_raise_endorsement_claim(self):
         print(f"\n[STEP 1] Login as USER ({self.user_name}) and fetching active policies...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
         
@@ -93,9 +94,19 @@ class TestUserToUwEndorsementClaimsFlow:
             res = API_CLIENT.post_multipart("claims", files=files, data={})
         
         assert res.status_code == 200, f"Claim submission failed: {res.text}"
-        print("Claim Submitted Successfully.")
+        claim_data = res.json()
+        assert isinstance(claim_data, dict), "Expected claim response to be a dictionary object"
+        assert "id" in claim_data, "Claim response missing 'id' key"
+        assert "status" in claim_data, "Claim response missing 'status' key"
+        print(f"Claim Submitted Successfully. Claim ID: {claim_data['id']}")
 
-    def test_02_uw_approve_endorsement_claim(self):
+        # Save claim ID to state for UW processing
+        state_path = os.path.join(os.path.dirname(self.file_path), "Logs", "last_endorsement_claim_state.json")
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
+        with open(state_path, "w") as f:
+            json.dump({"last_endorsement_claim_id": str(claim_data['id'])}, f)
+
+    def test_uw_approve_endorsement_claim(self):
         # [STEP 3] Login as UNDERWRITER and Search for the Claim
         print(f"\n[STEP 3] Login as UNDERWRITER ({self.uw_user}) and searching for claim...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
@@ -105,14 +116,29 @@ class TestUserToUwEndorsementClaimsFlow:
         assert res.status_code == 200, f"Failed to fetch claims: {res.text}"
         all_claims = res.json().get("content", [])
         
-        # Filter claims for our client that are not yet APPROVED
-        target_claim = next((claim for claim in all_claims if claim.get("clientId") == self.client_id and claim.get("status") != "APPROVED"), None)
+        # Try to read claim ID from state
+        state_path = os.path.join(os.path.dirname(self.file_path), "Logs", "last_endorsement_claim_state.json")
+        target_claim_id = None
+        if os.path.exists(state_path):
+            with open(state_path, "r") as f:
+                state = json.load(f)
+                target_claim_id = state.get("last_endorsement_claim_id")
+
+        # Filter claims for our client
+        target_claim = None
+        for claim in all_claims:
+            if target_claim_id and str(claim.get("id")) == target_claim_id:
+                target_claim = claim
+                break
+            elif claim.get("clientId") == self.client_id and claim.get("status") != "APPROVED":
+                target_claim = claim
+                break
         
         # Fallback to latest claim if none are pending
         if not target_claim:
              target_claim = next((claim for claim in all_claims if claim.get("clientId") == self.client_id), None)
 
-        assert target_claim is not None, f"Could not find a claim for client {self.client_id}"
+        assert target_claim is not None, f"Could not find a claim for client {self.client_id} (Claim ID: {target_claim_id})"
         claim_id = target_claim['id']
         print(f"Found Claim ID: {claim_id} | Status: {target_claim.get('status')}")
 

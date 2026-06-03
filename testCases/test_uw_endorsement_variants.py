@@ -3,12 +3,13 @@ import os
 import json
 import time
 from utilities.api_client import API_CLIENT
-from underwriter_api.endorsement_actions import raise_endorsement, get_endorsement_tickets, submit_endorsement
+from underwriter_api.endorsement_actions import raise_endorsement, get_endorsement_tickets, submit_endorsement, discover_underwriter_ticket_id
 from underwriter_api.policy_actions import get_personal_policies
 from dotenv import load_dotenv
 
 load_dotenv()
 
+@pytest.mark.endorsement
 class TestEndorsementVariants:
     @classmethod
     def setup_class(cls):
@@ -31,10 +32,20 @@ class TestEndorsementVariants:
     def _get_working_policy(self):
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
         res = get_personal_policies(self.client_id)
-        policies = res.json().get("data", {}).get("getPersonalPolicies", {}).get("policies", [])
-        if not policies:
-            pytest.fail("No active policies found for the user.")
-        return policies[0]
+        assert res.status_code == 200, f"Failed to get personal policies: {res.text}"
+        res_json = res.json()
+        assert "data" in res_json, "Response missing 'data' key"
+        assert "getPersonalPolicies" in res_json["data"], "Response missing 'getPersonalPolicies'"
+        policies = res_json["data"]["getPersonalPolicies"].get("policies", [])
+        assert isinstance(policies, list), "Expected 'policies' to be a list"
+        # Prioritize Health Insurance, then Life Insurance, then fallback to first active policy
+        policy = next((p for p in policies if p.get("insuranceType") == "Health Insurance"), None)
+        if not policy:
+            policy = next((p for p in policies if p.get("insuranceType") == "Life Insurance"), None)
+        if not policy:
+            policy = policies[0]
+        assert "id" in policy, "Policy object missing 'id'"
+        return policy
 
     def test_add_member_endorsement_flow(self):
         """
@@ -59,9 +70,15 @@ class TestEndorsementVariants:
             metadata=metadata
         )
         
+        assert res.status_code == 200, f"Failed to raise endorsement: {res.text}"
         res_json = res.json()
         assert "errors" not in res_json, f"Failed to raise endorsement: {res_json}"
-        request_id = res_json["data"]["saveEndorsementData"]["requestTypeId"]
+        assert "data" in res_json, "Response missing 'data' key"
+        assert "saveEndorsementData" in res_json["data"], "Response missing 'saveEndorsementData'"
+        save_data = res_json["data"]["saveEndorsementData"]
+        assert isinstance(save_data, dict), "Expected saveEndorsementData to be a dict"
+        request_id = save_data["requestTypeId"]
+        assert request_id is not None, "saveEndorsementData missing 'requestTypeId'"
         print(f"Endorsement Request Raised. ID: {request_id}")
 
         print("Waiting 5s for sync...")
@@ -71,12 +88,9 @@ class TestEndorsementVariants:
         print(f"[STEP 2] Underwriter ({self.uw_user}) processing ticket...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
         
-        tickets_res = get_endorsement_tickets(endorsement_tab="PENDING")
-        tickets = tickets_res.json()["data"]["getEndorsementTickets"]["content"]
-        
-        # Discover the real ticket ID
-        ticket = tickets[0] # Assuming the latest is ours
-        ticket_id = ticket["id"]
+        # Discover correct underwriter-side ticket ID using robust lookup
+        ticket_id = discover_underwriter_ticket_id(self.client_id, request_id)
+        assert ticket_id is not None, f"Could not discover underwriter-side ticket ID for request ID {request_id}"
         print(f"Discovered Ticket ID: {ticket_id}")
 
         request_dto = {
@@ -96,7 +110,10 @@ class TestEndorsementVariants:
         )
         
         assert submit_res.status_code == 200, f"Submission failed: {submit_res.text}"
-        print(f"Member Addition Endorsement Successful: {submit_res.json()}")
+        submit_json = submit_res.json()
+        assert isinstance(submit_json, dict), "Expected submit result to be a dictionary"
+        assert submit_json.get("success") is True, f"Submission success was not True: {submit_json}"
+        print(f"Member Addition Endorsement Successful: {submit_json}")
 
     def test_member_details_correction_flow(self):
         """
@@ -120,9 +137,15 @@ class TestEndorsementVariants:
             metadata=metadata
         )
         
+        assert res.status_code == 200, f"Failed to raise endorsement: {res.text}"
         res_json = res.json()
         assert "errors" not in res_json, f"Failed to raise endorsement: {res_json}"
-        request_id = res_json["data"]["saveEndorsementData"]["requestTypeId"]
+        assert "data" in res_json, "Response missing 'data' key"
+        assert "saveEndorsementData" in res_json["data"], "Response missing 'saveEndorsementData'"
+        save_data = res_json["data"]["saveEndorsementData"]
+        assert isinstance(save_data, dict), "Expected saveEndorsementData to be a dict"
+        request_id = save_data["requestTypeId"]
+        assert request_id is not None, "saveEndorsementData missing 'requestTypeId'"
         print(f"Correction Request Raised. ID: {request_id}")
 
         print("Waiting 5s for sync...")
@@ -132,8 +155,9 @@ class TestEndorsementVariants:
         print(f"[STEP 2] Underwriter processing ticket...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
         
-        tickets_res = get_endorsement_tickets(endorsement_tab="PENDING")
-        ticket_id = tickets_res.json()["data"]["getEndorsementTickets"]["content"][0]["id"]
+        # Discover correct underwriter-side ticket ID using robust lookup
+        ticket_id = discover_underwriter_ticket_id(self.client_id, request_id)
+        assert ticket_id is not None, f"Could not discover underwriter-side ticket ID for request ID {request_id}"
         
         request_dto = {
             "endorsementDetails": {
@@ -153,7 +177,10 @@ class TestEndorsementVariants:
         )
         
         assert submit_res.status_code == 200, f"Submission failed: {submit_res.text}"
-        print(f"Member Details Correction Successful: {submit_res.json()}")
+        submit_json = submit_res.json()
+        assert isinstance(submit_json, dict), "Expected submit result to be a dictionary"
+        assert submit_json.get("success") is True, f"Submission success was not True: {submit_json}"
+        print(f"Member Details Correction Successful: {submit_json}")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

@@ -9,6 +9,7 @@ from utilities.state_manager import STATE_FILE
 
 load_dotenv()
 
+@pytest.mark.claims
 class TestUserToUwClaimsFlow:
     @classmethod
     def setup_class(cls):
@@ -26,7 +27,7 @@ class TestUserToUwClaimsFlow:
         if not os.path.exists(cls.doc_path):
             raise FileNotFoundError(f"Test document not found: {cls.doc_path}")
 
-    def test_01_user_raise_claim(self):
+    def test_user_raise_claim(self):
         # --- STEP 1: USER FETCH POLICIES ---
         print(f"\n[STEP 1] Login as USER ({self.user_name}) and fetching active policies...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
@@ -70,14 +71,21 @@ class TestUserToUwClaimsFlow:
         
         res = raise_claim(claim_dto, files)
         assert res.status_code == 200, f"Failed to raise claim: {res.text}"
-        print(f"DEBUG: Raise Claim Response: {json.dumps(res.json(), indent=2)}")
-        print("Claim Raised Successfully.")
+        claim_data = res.json()
+        print(f"DEBUG: Raise Claim Response: {json.dumps(claim_data, indent=2)}")
+        assert isinstance(claim_data, dict), "Expected claim response to be a dictionary object"
+        assert "id" in claim_data, "Claim response missing 'id' key"
+        assert "status" in claim_data, "Claim response missing 'status' key"
+        print(f"Claim Raised Successfully. Claim ID: {claim_data['id']}")
         
-        # Save state for UW test to use if needed (optional tracking)
+        # Save state for UW test to use (cross-validation)
         with open(STATE_FILE, "w") as f:
-            json.dump({"last_claim_policy_id": str(target_policy['id'])}, f)
+            json.dump({
+                "last_claim_id": str(claim_data['id']),
+                "last_claim_policy_id": str(target_policy['id'])
+            }, f)
 
-    def test_02_uw_approve_claim(self):
+    def test_uw_approve_claim(self):
         # --- STEP 3: UNDERWRITER FETCH CLAIMS ---
         print(f"\n[STEP 3] Login as UNDERWRITER ({self.uw_user}) and searching for new claim...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
@@ -86,25 +94,30 @@ class TestUserToUwClaimsFlow:
         assert res.status_code == 200
         
         all_claims = res.json()
-        claims_list = all_claims if isinstance(all_claims, list) else all_claims.get("content", [])
+        chats_list = all_claims if isinstance(all_claims, list) else all_claims.get("content", [])
         
-        # Try to read policy_id from state file, otherwise just find any pending claim for the user
+        # Try to read policy_id and claim_id from state file
+        target_claim_id = None
         target_policy_id = None
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, "r") as f:
                 state = json.load(f)
+                target_claim_id = state.get("last_claim_id")
                 target_policy_id = state.get("last_claim_policy_id")
 
         found_claim = None
-        for c in claims_list:
-            # We look for a claim that belongs to the user and is not yet approved
-            if c.get("clientId") == self.client_id and c.get("status") != "APPROVED":
+        for c in chats_list:
+            # We look for a claim matching the last claim id
+            if target_claim_id and str(c.get("id")) == target_claim_id:
+                found_claim = c
+                break
+            elif c.get("clientId") == self.client_id and c.get("status") != "APPROVED":
                 if target_policy_id and c.get("policyId") != target_policy_id:
                     continue
                 found_claim = c
                 break
         
-        assert found_claim is not None, f"No pending claim found in underwriter list for client {self.client_id}"
+        assert found_claim is not None, f"No pending claim found in underwriter list for client {self.client_id} (Claim ID: {target_claim_id})"
         claim_id = found_claim['id']
         print(f"Found Claim ID: {claim_id} | Status: {found_claim.get('status')}")
         

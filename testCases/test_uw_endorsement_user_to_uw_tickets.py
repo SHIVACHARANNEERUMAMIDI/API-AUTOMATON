@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+@pytest.mark.endorsement
 class TestUserToUwEndorsementTicketsFlow:
     @classmethod
     def setup_class(cls):
@@ -27,7 +28,7 @@ class TestUserToUwEndorsementTicketsFlow:
             with open(cls.file_path, "wb") as f:
                 f.write(b"%PDF-1.4\n%dummy pdf")
 
-    def test_01_user_raise_endorsement(self):
+    def test_user_raise_endorsement(self):
         # [STEP 1] Raise Endorsement as USER
         print(f"\n[STEP 1] Login as USER ({self.user_name}) and raising endorsement request...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
@@ -62,7 +63,7 @@ class TestUserToUwEndorsementTicketsFlow:
         res_data = None
         ticket_id = None
         working_policy = None
-
+ 
         for policy in policies:
             policy_id = policy['id']
             print(f"Trying Policy ID: {policy_id} ({policy['insuranceType']})...")
@@ -99,9 +100,11 @@ class TestUserToUwEndorsementTicketsFlow:
             else:
                 error_msg = res_json.get("errors", [{"message": "Unknown error"}])[0]["message"]
                 print(f"Failed with Policy ID {policy_id}: {error_msg}")
-
+ 
         assert ticket_id is not None, "Could not find any policy eligible for endorsement."
         assert res_data["status"] == "Uploaded Successfully"
+        assert "requestTypeId" in res_data, "Response missing 'requestTypeId'"
+        assert "serviceRequestId" in res_data, "Response missing 'serviceRequestId'"
         print(f"Endorsement Request Raised Successfully. Ticket ID: {ticket_id}")
         
         # Save state for UW test to use
@@ -113,7 +116,7 @@ class TestUserToUwEndorsementTicketsFlow:
                 "insurance_type": working_policy['insuranceType']
             }, f)
 
-    def test_02_uw_process_endorsement(self):
+    def test_uw_process_endorsement(self):
         # [STEP 2] Fetch Pending Tickets to get the correct Ticket ID for processing
         print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) and fetching correct Ticket ID...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
@@ -149,7 +152,12 @@ class TestUserToUwEndorsementTicketsFlow:
         res = API_CLIENT.post_graphql(get_tickets_query, ticket_vars)
         assert res.status_code == 200, f"Failed to fetch tickets: {res.text}"
         res_json = res.json()
-        tickets = res_json["data"]["getEndorsementTickets"]["content"]
+        assert "data" in res_json, "Response missing 'data' key"
+        assert "getEndorsementTickets" in res_json["data"], "Response missing 'getEndorsementTickets'"
+        tickets_data = res_json["data"]["getEndorsementTickets"]
+        assert tickets_data.get("success") is True, "getEndorsementTickets success key is False"
+        tickets = tickets_data["content"]
+        assert isinstance(tickets, list), "Expected 'content' field to be a list"
         
         # Try to match with saved state if available
         working_policy = None
@@ -262,13 +270,15 @@ class TestUserToUwEndorsementTicketsFlow:
         }
 
         url = f"{API_CLIENT.paisaplan_base.rstrip('/')}/{endpoint.lstrip('/')}"
-        files = {
-            "endorsementAction": (None, "SUBMIT"),
-            "ticketId": (None, str(ticket_id)),
-            "requestDto": (None, json.dumps(request_dto)),
-            "endorsementCopy": ("endorsement_result.pdf", open(self.file_path, "rb"), "application/pdf")
-        }
-        res = API_CLIENT._request("POST", url, files=files, params=params)
+        with open(self.file_path, "rb") as f_pdf:
+            files = {
+                "endorsementAction": (None, "SUBMIT"),
+                "ticketId": (None, str(ticket_id)),
+                "requestDto": (None, json.dumps(request_dto)),
+                "endorsementCopy": ("endorsement_result.pdf", f_pdf.read(), "application/pdf")
+            }
+            res = API_CLIENT._request("POST", url, files=files, params=params)
+            
         assert res.status_code == 200, f"Underwriter submission failed: {res.text}"
         res_json = res.json()
         assert res_json.get("success") is True, f"Submission failed: {res_json.get('message')}"

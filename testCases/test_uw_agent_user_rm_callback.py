@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+@pytest.mark.agent
 class TestUserGeneralActionsFlow:
     @classmethod
     def setup_class(cls):

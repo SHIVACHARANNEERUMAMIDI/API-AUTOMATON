@@ -1,5 +1,6 @@
 import os
 import sys
+import pytest
 # Add current directory to path
 sys.path.append(os.getcwd())
 
@@ -8,20 +9,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def test_login():
-    username = os.getenv("USER_USERNAME")
-    password = os.getenv("USER_PASSWORD")
-    print(f"Testing login for {username}...")
-    try:
+@pytest.mark.login
+class TestLogin:
+    def test_login(self):
+        username = os.getenv("USER_USERNAME")
+        password = os.getenv("USER_PASSWORD")
+        print(f"Testing login for {username}...")
         API_CLIENT.set_credentials(username, password)
         headers = API_CLIENT._get_headers(include_auth=True)
         token = headers.get("Authorization", "")
-        if token:
-            print(f"Token obtained successfully: {token[:20]}...")
-        else:
-            print("Login FAILED: No token in headers")
-    except Exception as e:
-        print(f"Login FAILED: {str(e)}")
+        assert token, "Login FAILED: No Authorization token in headers"
+        assert token.startswith("Bearer "), "Token should start with Bearer prefix"
+        print(f"Token obtained successfully: {token[:20]}...")
 
 if __name__ == "__main__":
-    test_login()
+    pytest.main([__file__, "-v", "-s"])

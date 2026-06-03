@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-class TestAllPolicyTypesDigitization:
+@pytest.mark.digitization
+class TestPolicySubtypesDigitization:
     @classmethod
     def setup_class(cls):
         cls.client_id = os.getenv("TEST_CLIENT_ID", "919573464433")
@@ -31,7 +32,7 @@ class TestAllPolicyTypesDigitization:
         ("Home Insurance", "Structure and Contents"),
         ("Marine Insurance", "Cargo")
     ])
-    def test_digitization_flow_per_type(self, insurance_type, product_sub_type):
+    def test_policy_subtypes_digitization_flow(self, insurance_type, product_sub_type):
         print(f"\n[START] Testing Flow for: {insurance_type} | {product_sub_type}")
         
         # --- STEP 1: USER UPLOAD ---
