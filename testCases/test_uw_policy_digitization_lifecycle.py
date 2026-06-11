@@ -2,11 +2,11 @@ import pytest
 import os
 import json
 from utilities.api_client import API_CLIENT
-from underwriter_api.document_actions import upload_document
-from underwriter_api.policy_actions import create_policy_ticket, verify_policy_ticket, get_policy_digitalization_tickets
-from dotenv import load_dotenv
+from underwriter_api.document_actions import DocumentActions
+from underwriter_api.policy_actions import PolicyActions
+from utilities.customLogger import customLogger
 
-load_dotenv()
+logger = customLogger("TestPolicyDigitizationLifecycle")
 
 @pytest.mark.digitization
 class TestPolicyDigitizationLifecycle:
@@ -19,11 +19,14 @@ class TestPolicyDigitizationLifecycle:
     
     @pytest.fixture(autouse=True)
     def setup(self):
-        self.user_id = os.getenv("TEST_CLIENT_ID", "8309718792")
+        self.user_id = os.getenv("TEST_CLIENT_ID")
         self.uw_user = os.getenv("UW_USERNAME")
         self.uw_pass = os.getenv("UW_PASSWORD")
         self.user_name = os.getenv("USER_USERNAME")
         self.user_pass = os.getenv("USER_PASSWORD")
+        
+        if not self.user_id or not self.uw_user or not self.uw_pass or not self.user_name or not self.user_pass:
+            raise ValueError("Mandatory environment variables (TEST_CLIENT_ID, UW_USERNAME, UW_PASSWORD, USER_USERNAME, USER_PASSWORD) are missing.")
         
         # Paths
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +36,8 @@ class TestPolicyDigitizationLifecycle:
         if not os.path.exists(self.file_path):
             raise FileNotFoundError(f"User uploaded file not found at: {self.file_path}")
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     @pytest.mark.parametrize("insurance_type", [
         "Motor Insurance",
         "Health Insurance",
@@ -42,16 +47,18 @@ class TestPolicyDigitizationLifecycle:
     ])
     def test_user_upload(self, insurance_type):
         # --- STEP 1: USER SIDE (Upload) ---
-        print(f"\n[STEP 1] Login as USER ({self.user_name}) and Uploading Document for {insurance_type}...")
+        logger.info(f"Login as USER ({self.user_name}) and Uploading Document for {insurance_type}...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
         
         # Upload Document
-        res = upload_document(self.file_path, self.user_id, request_type="SAVEPOLICY")
+        res = DocumentActions.upload_document(self.file_path, self.user_id, request_type="SAVEPOLICY")
         assert res.status_code == 200, f"User upload failed: {res.text}"
         upload_data = res.json()
         assert isinstance(upload_data, dict), "Expected upload response to be a dictionary"
-        print(f"User side: Document Uploaded Successfully for {insurance_type}.")
+        logger.info(f"User side: Document Uploaded Successfully for {insurance_type}.")
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     @pytest.mark.parametrize("insurance_type", [
         "Motor Insurance",
         "Health Insurance",
@@ -61,11 +68,11 @@ class TestPolicyDigitizationLifecycle:
     ])
     def test_uw_verify_and_submit(self, insurance_type):
         # --- STEP 2: UNDERWRITER SIDE (Search by Client ID) ---
-        print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) and Searching for Ticket with Client ID: {self.user_id}")
+        logger.info(f"Login as UNDERWRITER ({self.uw_user}) and Searching for Ticket with Client ID: {self.user_id}")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
         
         # Search tickets by clientId
-        res = get_policy_digitalization_tickets(search=self.user_id)
+        res = PolicyActions.get_policy_digitalization_tickets(search=self.user_id)
         assert res.status_code == 200, f"Failed to fetch tickets: {res.text}"
         
         tickets_data = res.json()["data"]["getPolicyDigitalizationTicketsData"]
@@ -83,10 +90,10 @@ class TestPolicyDigitizationLifecycle:
         
         ticket_id = target_ticket["id"]
         policy_id = target_ticket["policyId"]
-        print(f"Found Ticket ID: {ticket_id} | Policy ID: {policy_id} | Client: {target_ticket.get('clientName', 'N/A')}")
+        logger.info(f"Found Ticket ID: {ticket_id} | Policy ID: {policy_id} | Client: {target_ticket.get('clientName', 'N/A')}")
 
         # --- STEP 3: UNDERWRITER SIDE (Verify & Submit) ---
-        print(f"\n[STEP 3] Underwriter Submitting Verification for Ticket: {ticket_id}")
+        logger.info(f"Underwriter Submitting Verification for Ticket: {ticket_id}")
         
         # Construct form data using values from the search result and user-provided overrides
         verify_form = {
@@ -134,15 +141,13 @@ class TestPolicyDigitizationLifecycle:
             "policyMembers": []
         }
         
-        res = verify_policy_ticket(verify_form, action="SUBMIT", file_path=self.file_path)
+        res = PolicyActions.verify_policy_ticket(verify_form, action="SUBMIT", file_path=self.file_path)
         assert res.status_code == 200, f"Underwriter verification failed: {res.text}"
         
         verify_res = res.json()
-        print(f"DEBUG: verifyPolicyTicket Full Response: {json.dumps(verify_res, indent=2)}")
-        assert verify_res.get("success") is True, f"Response message: {verify_res.get('message')}"
-        print(f"Underwriter side: Policy Verified & Submitted Successfully. Message: {verify_res.get('message')}")
+        logger.info(f"verifyPolicyTicket Full Response: {json.dumps(verify_res, indent=2)}")
         
-        print("\n[FLOW COMPLETE] Refined Chained Flow Finished Successfully.")
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+        # Business validation
+        assert verify_res.get("success") is True, f"Response message: {verify_res.get('message')}"
+        logger.info(f"Underwriter side: Policy Verified & Submitted Successfully. Message: {verify_res.get('message')}")
+        logger.info("Refined Chained Flow Finished Successfully.")

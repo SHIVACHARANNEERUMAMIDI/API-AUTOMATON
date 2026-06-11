@@ -3,19 +3,24 @@ import os
 import json
 import time
 from utilities.api_client import API_CLIENT
-from dotenv import load_dotenv
+from underwriter_api.policy_actions import PolicyActions
+from underwriter_api.endorsement_actions import EndorsementActions
+from utilities.customLogger import customLogger
 
-load_dotenv()
+logger = customLogger("TestEndorsementTicketsLifecycle")
 
 @pytest.mark.endorsement
 class TestEndorsementTicketsLifecycle:
     @classmethod
     def setup_class(cls):
-        cls.client_id = os.getenv("TEST_CLIENT_ID", "919573464433")
-        cls.user_name = os.getenv("USER_USERNAME", "919573464433")
-        cls.user_pass = os.getenv("USER_PASSWORD", "Anuj@123")
-        cls.uw_user = os.getenv("UW_USERNAME", "403rajeev")
-        cls.uw_pass = os.getenv("UW_PASSWORD", "Test@1234")
+        cls.client_id = os.getenv("TEST_CLIENT_ID")
+        cls.user_name = os.getenv("USER_USERNAME")
+        cls.user_pass = os.getenv("USER_PASSWORD")
+        cls.uw_user = os.getenv("UW_USERNAME")
+        cls.uw_pass = os.getenv("UW_PASSWORD")
+        
+        if not cls.client_id or not cls.user_name or not cls.user_pass or not cls.uw_user or not cls.uw_pass:
+            raise ValueError("Mandatory environment variables (TEST_CLIENT_ID, USER_USERNAME, USER_PASSWORD, UW_USERNAME, UW_PASSWORD) are missing.")
         
         # Base file path for dummy documents
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,35 +33,15 @@ class TestEndorsementTicketsLifecycle:
             with open(cls.file_path, "wb") as f:
                 f.write(b"%PDF-1.4\n%dummy pdf")
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_user_raise_endorsement(self):
         # [STEP 1] Raise Endorsement as USER
-        print(f"\n[STEP 1] Login as USER ({self.user_name}) and raising endorsement request...")
+        logger.info(f"Login as USER ({self.user_name}) and raising endorsement request...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
         
-        # GraphQL Mutation: SaveEndorsementData
-        mutation = """
-        mutation SaveEndorsementData($input: EndorsementData!) {
-          saveEndorsementData(input: $input) {
-            status
-            requestTypeId
-            serviceRequestId
-          }
-        }
-        """
-        
         # GraphQL Query: getPersonalPolicies
-        query_policies = """
-        {
-          getPersonalPolicies(
-            clientId: "919573464433"
-            clientType: INDIVIDUAL
-            expiryType: ACTIVE
-          ) {
-            policies { id policyNumber insuranceType }
-          }
-        }
-        """
-        res_policies = API_CLIENT.post_graphql(query_policies)
+        res_policies = PolicyActions.get_personal_policies(self.client_id, client_type="INDIVIDUAL", expiry_type="ACTIVE")
         policies = res_policies.json().get("data", {}).get("getPersonalPolicies", {}).get("policies", [])
         assert len(policies) > 0, "No active policies found to raise endorsement."
         
@@ -66,46 +51,39 @@ class TestEndorsementTicketsLifecycle:
  
         for policy in policies:
             policy_id = policy['id']
-            print(f"Trying Policy ID: {policy_id} ({policy['insuranceType']})...")
+            logger.info(f"Trying Policy ID: {policy_id} ({policy['insuranceType']})...")
             
-            variables = {
-                "input": {
-                    "clientId": self.client_id,
-                    "endorsementType": "POLICY_CORRECTION",
-                    "policyId": policy_id,
-                    "endorsementRaisedFor": self.client_id,
-                    "endorsementRaisedForClientType": "RETAIL_INDIVIDUAL",
-                    "notificationCategory": "NONE",
-                    "endorsementStatus": "Request Submitted",
-                    "email": "test@example.com",
-                    "mobileNumber": self.client_id,
-                    "metadata": {
-                        "policyStartDate": "2026-05-11",
-                        "premiumAmountPaid": "79919",
-                        "insuranceName": policy["insuranceType"],
-                        "others": "Automated Endorsement Flow Test"
-                    }
-                }
+            metadata = {
+                "policyStartDate": "2026-05-11",
+                "premiumAmountPaid": "79919",
+                "insuranceName": policy["insuranceType"],
+                "others": "Automated Endorsement Flow Test"
             }
             
-            res = API_CLIENT.post_graphql(mutation, variables=variables)
+            res = EndorsementActions.raise_endorsement(
+                client_id=self.client_id,
+                policy_id=policy_id,
+                endorsement_type="POLICY_CORRECTION",
+                metadata=metadata,
+                email="test@example.com"
+            )
             res_json = res.json()
             
             if "errors" not in res_json and res_json.get("data", {}).get("saveEndorsementData"):
                 res_data = res_json["data"]["saveEndorsementData"]
                 ticket_id = res_data["requestTypeId"]
                 working_policy = policy
-                print(f"Success with Policy ID: {policy_id}. Ticket ID: {ticket_id}")
+                logger.info(f"Success with Policy ID: {policy_id}. Ticket ID: {ticket_id}")
                 break
             else:
                 error_msg = res_json.get("errors", [{"message": "Unknown error"}])[0]["message"]
-                print(f"Failed with Policy ID {policy_id}: {error_msg}")
+                logger.warning(f"Failed with Policy ID {policy_id}: {error_msg}")
  
         assert ticket_id is not None, "Could not find any policy eligible for endorsement."
         assert res_data["status"] == "Uploaded Successfully"
         assert "requestTypeId" in res_data, "Response missing 'requestTypeId'"
         assert "serviceRequestId" in res_data, "Response missing 'serviceRequestId'"
-        print(f"Endorsement Request Raised Successfully. Ticket ID: {ticket_id}")
+        logger.info(f"Endorsement Request Raised Successfully. Ticket ID: {ticket_id}")
         
         # Save state for UW test to use
         with open(self.state_file_path, "w") as f:
@@ -116,40 +94,14 @@ class TestEndorsementTicketsLifecycle:
                 "insurance_type": working_policy['insuranceType']
             }, f)
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_uw_process_endorsement(self):
         # [STEP 2] Fetch Pending Tickets to get the correct Ticket ID for processing
-        print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) and fetching correct Ticket ID...")
+        logger.info(f"Login as UNDERWRITER ({self.uw_user}) and fetching correct Ticket ID...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
         
-        get_tickets_query = """
-        query GET_ENDORSEMENT_TICKETS_DATA($page: Int, $size: Int, $filters: [EndorsementTicketFilter], $search: String, $endorsementTab: EndorsementTab) {
-          getEndorsementTickets(
-            page: $page
-            size: $size
-            filters: $filters
-            search: $search
-            endorsementTab: $endorsementTab
-          ) {
-            success
-            message
-            content {
-              id
-              status
-              clientId
-              clientName
-              companyName
-            }
-          }
-        }
-        """
-        ticket_vars = {
-            "page": 1,
-            "size": 10,
-            "search": self.client_id,
-            "endorsementTab": "PENDING",
-            "filters": []
-        }
-        res = API_CLIENT.post_graphql(get_tickets_query, ticket_vars)
+        res = EndorsementActions.get_endorsement_tickets(search=self.client_id, endorsement_tab="PENDING")
         assert res.status_code == 200, f"Failed to fetch tickets: {res.text}"
         res_json = res.json()
         assert "data" in res_json, "Response missing 'data' key"
@@ -168,36 +120,28 @@ class TestEndorsementTicketsLifecycle:
         target_ticket = None
         if tickets:
             if working_policy:
-                # 1. Try exact Ticket ID match if available from state
                 if working_policy.get("ticket_id"):
                     target_ticket = next((t for t in tickets if str(t["id"]) == str(working_policy["ticket_id"])), None)
-                
-                # 2. Fallback to picking the latest ticket if no ID match (since list is usually sorted by newest)
                 if not target_ticket:
                     target_ticket = tickets[0]
             else:
                 target_ticket = tickets[0]
             
             real_ticket_id = target_ticket["id"]
-            print(f"Discovered correct Ticket ID for processing: {real_ticket_id}")
+            logger.info(f"Discovered correct Ticket ID for processing: {real_ticket_id}")
         else:
             pytest.fail("Underwriter has no pending tickets for this client.")
 
         # [STEP 3] Process Endorsement as UNDERWRITER
-        print(f"\n[STEP 3] Processing ticket: {real_ticket_id}...")
+        logger.info(f"Processing ticket: {real_ticket_id}...")
         ticket_id = real_ticket_id
         
-        # Fetch working policy info from ticket if not in state
         if not working_policy:
             working_policy = {
                 "policy_id": "UNKNOWN",
                 "policy_number": "D601108267",
                 "insurance_type": "Health Insurance"
             }
-
-        # The multipart POST endpoint for saving/submitting underwriter processing
-        endpoint = "fileUpload/save"
-        params = {"id": ticket_id}
         
         request_dto = {
             "cdAccountDetails": {"cdAccountId": "", "cdAccountNumber": "", "cdBalance": ""},
@@ -269,20 +213,14 @@ class TestEndorsementTicketsLifecycle:
             }
         }
 
-        url = f"{API_CLIENT.paisaplan_base.rstrip('/')}/{endpoint.lstrip('/')}"
-        with open(self.file_path, "rb") as f_pdf:
-            files = {
-                "endorsementAction": (None, "SUBMIT"),
-                "ticketId": (None, str(ticket_id)),
-                "requestDto": (None, json.dumps(request_dto)),
-                "endorsementCopy": ("endorsement_result.pdf", f_pdf.read(), "application/pdf")
-            }
-            res = API_CLIENT._request("POST", url, files=files, params=params)
+        res = EndorsementActions.submit_endorsement(
+            ticket_id=ticket_id,
+            request_dto=request_dto,
+            endorsement_copy_path=self.file_path,
+            action="SUBMIT"
+        )
             
         assert res.status_code == 200, f"Underwriter submission failed: {res.text}"
         res_json = res.json()
         assert res_json.get("success") is True, f"Submission failed: {res_json.get('message')}"
-        print(f"Endorsement Ticket {ticket_id} Processed Successfully.")
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+        logger.info(f"Endorsement Ticket {ticket_id} Processed Successfully.")

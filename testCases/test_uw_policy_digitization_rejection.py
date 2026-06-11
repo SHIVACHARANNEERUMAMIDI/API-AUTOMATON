@@ -3,12 +3,11 @@ import json
 import pytest
 import time
 from utilities.api_client import API_CLIENT
-from underwriter_api.document_actions import upload_document
-from underwriter_api.policy_actions import verify_policy_ticket, get_policy_digitalization_tickets
-from dotenv import load_dotenv
+from underwriter_api.document_actions import DocumentActions
+from underwriter_api.policy_actions import PolicyActions
+from utilities.customLogger import customLogger
 
-# Load environment variables
-load_dotenv()
+logger = customLogger("TestPolicyDigitizationRejection")
 
 @pytest.mark.digitization
 class TestPolicyDigitizationRejection:
@@ -22,12 +21,14 @@ class TestPolicyDigitizationRejection:
 
     @classmethod
     def setup_class(cls):
-        # Configuration
-        cls.client_id = os.getenv("USER_USERNAME", "919573464433")
-        cls.user_name = os.getenv("USER_USERNAME", "919573464433")
-        cls.user_pass = os.getenv("USER_PASSWORD", "Anuj@123")
-        cls.uw_user = os.getenv("UNDERWRITER_USERNAME", "403rajeev")
-        cls.uw_pass = os.getenv("UNDERWRITER_PASSWORD", "Test@1234")
+        cls.client_id = os.getenv("USER_USERNAME")
+        cls.user_name = os.getenv("USER_USERNAME")
+        cls.user_pass = os.getenv("USER_PASSWORD")
+        cls.uw_user = os.getenv("UNDERWRITER_USERNAME")
+        cls.uw_pass = os.getenv("UNDERWRITER_PASSWORD")
+        
+        if not cls.client_id or not cls.user_name or not cls.user_pass or not cls.uw_user or not cls.uw_pass:
+            raise ValueError("Mandatory environment variables (USER_USERNAME, USER_PASSWORD, UNDERWRITER_USERNAME, UNDERWRITER_PASSWORD) are missing.")
         
         # Base file path for dummy documents
         cls.file_path = "digitalization_rejection_doc.pdf"
@@ -39,22 +40,24 @@ class TestPolicyDigitizationRejection:
         if os.path.exists(cls.file_path):
             os.remove(cls.file_path)
 
+    @pytest.mark.P1
+    @pytest.mark.Regression
     def test_digitalization_rejection_lifecycle(self):
         # [STEP 1] Login as USER and Upload Document
-        print(f"\n[STEP 1] Login as USER ({self.user_name}) and uploading policy document...")
+        logger.info(f"Login as USER ({self.user_name}) and uploading policy document...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
         
         # Upload Document triggers ticket creation
-        res = upload_document(self.file_path, self.client_id, request_type="SAVEPOLICY")
+        res = DocumentActions.upload_document(self.file_path, self.client_id, request_type="SAVEPOLICY")
         assert res.status_code == 200, f"User upload failed: {res.text}"
-        print("User side: Document Uploaded Successfully (Ticket Created).")
+        logger.info("User side: Document Uploaded Successfully (Ticket Created).")
 
         # [STEP 2] Login as UNDERWRITER and Search for the Ticket
-        print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) and searching for ticket...")
+        logger.info(f"Login as UNDERWRITER ({self.uw_user}) and searching for ticket...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
         
         # Search tickets by clientId
-        res = get_policy_digitalization_tickets(search=self.client_id)
+        res = PolicyActions.get_policy_digitalization_tickets(search=self.client_id)
         assert res.status_code == 200, f"Failed to fetch tickets: {res.text}"
         
         tickets_data = res.json()["data"]["getPolicyDigitalizationTicketsData"]
@@ -67,15 +70,15 @@ class TestPolicyDigitizationRejection:
         
         ticket_id = target_ticket["id"]
         policy_id = target_ticket["policyId"]
-        print(f"Found Ticket ID: {ticket_id} | Policy ID: {policy_id}")
+        logger.info(f"Found Ticket ID: {ticket_id} | Policy ID: {policy_id}")
 
         # [STEP 3] Underwriter REJECT Digitalization Request
-        print(f"\n[STEP 3] Rejecting Digitalization for Ticket: {ticket_id}...")
+        logger.info(f"Rejecting Digitalization for Ticket: {ticket_id}...")
         
         # Construct form data for REJECTION
         verify_form = {
             "id": ticket_id,
-            "decision": "REJECTED", # KEY CHANGE: REJECTED instead of COMPLETED
+            "decision": "REJECTED",
             "typeOfPolicy": "NEW",
             "policyId": policy_id,
             "policyNumber": target_ticket.get("policyNumber", "D601108267"),
@@ -87,28 +90,21 @@ class TestPolicyDigitizationRejection:
             "policyMembers": []
         }
         
-        # verify_policy_ticket handles the multipart request to verifyPolicyTicket mutation/REST
-        res = verify_policy_ticket(verify_form, action="SUBMIT", file_path=self.file_path)
+        res = PolicyActions.verify_policy_ticket(verify_form, action="SUBMIT", file_path=self.file_path)
         assert res.status_code == 200, f"Underwriter rejection failed: {res.text}"
         
         verify_res = res.json()
-        print(f"Server Response: {verify_res}")
+        logger.info(f"Server Response: {verify_res}")
         assert verify_res.get("success") is True, f"Response message: {verify_res.get('message')}"
-        print(f"Underwriter side: Policy REJECTED Successfully. Message: {verify_res.get('message')}")
+        logger.info(f"Underwriter side: Policy REJECTED Successfully. Message: {verify_res.get('message')}")
         
-        # [VERIFY] Check ticket status in the list
-        print("\n[VERIFY] Checking ticket status in digitalization queue...")
-        res = get_policy_digitalization_tickets(search=self.client_id)
+        # [VERIFY] Check ticket status in the list - Business validation
+        logger.info("Checking ticket status in digitalization queue...")
+        res = PolicyActions.get_policy_digitalization_tickets(search=self.client_id)
         updated_tickets = res.json()["data"]["getPolicyDigitalizationTicketsData"]["content"]
         updated_ticket = next((t for t in updated_tickets if t["id"] == ticket_id), None)
         
-        # If it's rejected, it might still show in the list with status REJECTED
-        # Note: Depending on UI filters, it might move to a different 'REJECTED' tab.
         if updated_ticket:
-            print(f"Ticket {ticket_id} status is now: {updated_ticket.get('status')}")
-            # The backend sets TaskStatus.REJECTED which usually maps to "REJECTED" in response
+            logger.info(f"Ticket {ticket_id} status is now: {updated_ticket.get('status')}")
             assert updated_ticket.get("status") == "REJECTED"
-            print("Verification Successful!")
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+            logger.info("Verification Successful!")

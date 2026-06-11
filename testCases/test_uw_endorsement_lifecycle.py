@@ -1,13 +1,12 @@
 import pytest
-import json
-import time
 import os
 from utilities.api_client import API_CLIENT
-from dotenv import load_dotenv
+from underwriter_api.policy_actions import PolicyActions
+from underwriter_api.endorsement_actions import EndorsementActions
+from utilities.customLogger import customLogger
 from utilities.state_manager import save_state, get_state
-from underwriter_api.endorsement_actions import submit_endorsement, discover_underwriter_ticket_id
 
-load_dotenv()
+logger = customLogger("TestEndorsementLifecycle")
 
 @pytest.mark.endorsement
 class TestEndorsementLifecycle:
@@ -18,11 +17,14 @@ class TestEndorsementLifecycle:
 
     @classmethod
     def setup_class(cls):
-        cls.user_phone = os.getenv("USER_USERNAME", "919573464433")
-        cls.user_pass = os.getenv("USER_PASSWORD", "Anuj@123")
-        cls.uw_user = os.getenv("UNDERWRITER_USERNAME", "403rajeev")
-        cls.uw_pass = os.getenv("UNDERWRITER_PASSWORD", "Test@1234")
+        cls.user_phone = os.getenv("USER_USERNAME")
+        cls.user_pass = os.getenv("USER_PASSWORD")
+        cls.uw_user = os.getenv("UNDERWRITER_USERNAME")
+        cls.uw_pass = os.getenv("UNDERWRITER_PASSWORD")
         cls.client_id = cls.user_phone
+        
+        if not cls.user_phone or not cls.user_pass or not cls.uw_user or not cls.uw_pass:
+            raise ValueError("Mandatory environment variables (USER_USERNAME, USER_PASSWORD, UNDERWRITER_USERNAME, UNDERWRITER_PASSWORD) are missing.")
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         automation_root = os.path.dirname(current_dir)
@@ -33,27 +35,22 @@ class TestEndorsementLifecycle:
             with open(cls.file_path, "wb") as f:
                 f.write(b"%PDF-1.4 test content")
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_user_raises_endorsement_request(self):
         """USER login and fetch policies, then raise endorsement."""
-        print(f"\n[STEP 1] Login as USER ({self.user_phone})...")
+        logger.info(f"Login as USER ({self.user_phone})...")
         API_CLIENT.set_credentials(self.user_phone, self.user_pass)
 
         # 1. Fetch Policies
-        get_policies_query = """
-        query getPersonalPolicies($clientId: String, $clientType: ClientType) {
-          getPersonalPolicies(clientId: $clientId, clientType: $clientType, expiryType: ACTIVE) {
-            policies { id insuranceType issuedOn }
-          }
-        }
-        """
-        res = API_CLIENT.post_graphql(get_policies_query, {"clientId": self.client_id, "clientType": "INDIVIDUAL"})
+        res = PolicyActions.get_personal_policies(self.client_id, client_type="INDIVIDUAL", expiry_type="ACTIVE")
         assert res.status_code == 200, f"Failed to get personal policies: {res.text}"
         res_json = res.json()
         assert "data" in res_json, "Response missing 'data'"
         assert "getPersonalPolicies" in res_json["data"], "Response missing 'getPersonalPolicies'"
         policies = res_json["data"]["getPersonalPolicies"]["policies"]
         assert isinstance(policies, list), "Expected 'policies' to be a list"
-        # Prioritize Health Insurance, then Life Insurance, then fallback to first active policy
+        
         policy = next((p for p in policies if p.get("insuranceType") == "Health Insurance"), None)
         if not policy:
             policy = next((p for p in policies if p.get("insuranceType") == "Life Insurance"), None)
@@ -65,23 +62,14 @@ class TestEndorsementLifecycle:
         save_state("insuranceType", policy["insuranceType"])
 
         # 2. Raise Endorsement
-        mutation = """
-        mutation SaveEndorsementData($input: EndorsementData!) {
-          saveEndorsementData(input: $input) { requestTypeId }
-        }
-        """
-        mutation_input = {
-            "clientId": self.client_id,
-            "endorsementType": "POLICY_CORRECTION",
-            "policyId": policy["id"],
-            "endorsementRaisedFor": self.client_id,
-            "endorsementRaisedForClientType": "RETAIL_INDIVIDUAL",
-            "endorsementStatus": "Request Submitted",
-            "email": "automation@test.com",
-            "mobileNumber": self.user_phone,
-            "metadata": {"premiumAmountPaid": "111111111"}
-        }
-        res = API_CLIENT.post_graphql(mutation, {"input": mutation_input})
+        metadata = {"premiumAmountPaid": "111111111"}
+        res = EndorsementActions.raise_endorsement(
+            client_id=self.client_id,
+            policy_id=policy["id"],
+            endorsement_type="POLICY_CORRECTION",
+            metadata=metadata,
+            email="automation@test.com"
+        )
         assert res.status_code == 200, f"Failed to raise endorsement: {res.text}"
         res_json = res.json()
         assert "data" in res_json, "Response missing 'data'"
@@ -93,8 +81,10 @@ class TestEndorsementLifecycle:
         
         # SAVE STATE
         save_state("ticketId", ticket_id)
-        print(f"Endorsement Raised. Saved Ticket ID to state: {ticket_id}")
+        logger.info(f"Endorsement Raised. Saved Ticket ID to state: {ticket_id}")
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_underwriter_processes_endorsement(self):
         """UNDERWRITER processes the ticket (Can be run independently)."""
         ticket_id = get_state("ticketId")
@@ -104,11 +94,11 @@ class TestEndorsementLifecycle:
         if not ticket_id:
             pytest.fail("No ticketId found in state. Run Step 1 first or provide one manually.")
 
-        print(f"\n[STEP 2] Login as UNDERWRITER ({self.uw_user}) for Ticket: {ticket_id}...")
+        logger.info(f"Login as UNDERWRITER ({self.uw_user}) for Ticket: {ticket_id}...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
 
         # Discover correct underwriter-side ticket ID
-        real_ticket_id = discover_underwriter_ticket_id(self.client_id, ticket_id)
+        real_ticket_id = EndorsementActions.discover_underwriter_ticket_id(self.client_id, ticket_id)
         assert real_ticket_id is not None, f"Could not discover underwriter-side ticket ID for request ID {ticket_id}"
 
         # Build DTO
@@ -124,8 +114,8 @@ class TestEndorsementLifecycle:
             }
         }
 
-        # Submit using our stabilized action
-        res = submit_endorsement(
+        # Submit using our stabilized action class
+        res = EndorsementActions.submit_endorsement(
             ticket_id=real_ticket_id,
             request_dto=request_dto,
             endorsement_copy_path=self.file_path
@@ -135,7 +125,4 @@ class TestEndorsementLifecycle:
         res_json = res.json()
         assert isinstance(res_json, dict), "Expected submission response to be a dictionary"
         assert res_json.get("success") is True, f"Submission success was not True: {res_json}"
-        print(f"Endorsement Lifecycle Complete for Ticket {ticket_id}!")
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-s"])
+        logger.info(f"Endorsement Lifecycle Complete for Ticket {ticket_id}!")

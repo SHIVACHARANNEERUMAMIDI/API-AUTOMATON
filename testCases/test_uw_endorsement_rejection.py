@@ -3,11 +3,11 @@ import json
 import time
 import pytest
 from utilities.api_client import API_CLIENT
-from underwriter_api.endorsement_actions import submit_endorsement, discover_underwriter_ticket_id
-from dotenv import load_dotenv
+from underwriter_api.endorsement_actions import EndorsementActions
+from underwriter_api.policy_actions import PolicyActions
+from utilities.customLogger import customLogger
 
-# Load environment variables
-load_dotenv()
+logger = customLogger("TestEndorsementRejection")
 
 @pytest.mark.endorsement
 class TestEndorsementRejection:
@@ -23,14 +23,15 @@ class TestEndorsementRejection:
 
     @classmethod
     def setup_class(cls):
-        # Configuration
-        cls.user_phone = os.getenv("USER_USERNAME", "919573464433")
-        cls.user_password = os.getenv("USER_PASSWORD", "Anuj@123")
-        cls.uw_username = os.getenv("UNDERWRITER_USERNAME", "403rajeev")
-        cls.uw_password = os.getenv("UNDERWRITER_PASSWORD", "Test@1234")
+        cls.user_phone = os.getenv("USER_USERNAME")
+        cls.user_password = os.getenv("USER_PASSWORD")
+        cls.uw_username = os.getenv("UNDERWRITER_USERNAME")
+        cls.uw_password = os.getenv("UNDERWRITER_PASSWORD")
         cls.client_id = cls.user_phone
         
-        # Create a dummy file for upload
+        if not cls.user_phone or not cls.user_password or not cls.uw_username or not cls.uw_password:
+            raise ValueError("Mandatory environment variables (USER_USERNAME, USER_PASSWORD, UNDERWRITER_USERNAME, UNDERWRITER_PASSWORD) are missing.")
+        
         cls.file_path = "rejection_proof.pdf"
         with open(cls.file_path, "wb") as f:
             f.write(b"%PDF-1.4 dummy rejection content")
@@ -40,6 +41,8 @@ class TestEndorsementRejection:
         if os.path.exists(cls.file_path):
             os.remove(cls.file_path)
 
+    @pytest.mark.P1
+    @pytest.mark.Regression
     @pytest.mark.parametrize("endorsement_type", [
         "POLICY_CORRECTION",
         "ADDITION_OR_DELETION",
@@ -47,38 +50,28 @@ class TestEndorsementRejection:
     ])
     def test_endorsement_rejection_lifecycle(self, endorsement_type):
         # [STEP 1] Login as USER
-        print(f"\n[STEP 1] Login as USER ({self.user_phone})...")
+        logger.info(f"Login as USER ({self.user_phone})...")
         API_CLIENT.set_credentials(self.user_phone, self.user_password)
         
         # Fetch active policies
-        res = API_CLIENT.post_graphql("""
-        query getPersonalPolicies($clientId: String, $clientType: ClientType, $expiryType: ExpiryType) {
-          getPersonalPolicies(clientId: $clientId, clientType: $clientType, expiryType: $expiryType) {
-            policies { id policyNumber insuranceType }
-          }
-        }
-        """, {"clientId": self.client_id, "clientType": "INDIVIDUAL", "expiryType": "ACTIVE"})
-        
+        res = PolicyActions.get_personal_policies(self.client_id, client_type="INDIVIDUAL", expiry_type="ACTIVE")
         assert res.status_code == 200, f"Failed to fetch active policies: {res.text}"
         res_json = res.json()
         assert "data" in res_json, "Response missing 'data' key"
         assert "getPersonalPolicies" in res_json["data"], "Response missing 'getPersonalPolicies'"
         policies = res_json["data"]["getPersonalPolicies"]["policies"]
         assert isinstance(policies, list), "Expected 'policies' to be a list"
-        # Prioritize Health Insurance, then Life Insurance, then fallback to first active policy
+        
         working_policy = next((p for p in policies if p.get("insuranceType") == "Health Insurance"), None)
         if not working_policy:
             working_policy = next((p for p in policies if p.get("insuranceType") == "Life Insurance"), None)
         if not working_policy:
             working_policy = policies[0]
         assert "id" in working_policy, "Policy object missing 'id'"
-        print(f"DEBUG: Selected Policy: {working_policy}")
-        print(f"DEBUG: Using Client ID: {self.client_id}")
 
         # [STEP 2] Raise Endorsement Request
-        print(f"\n[STEP 2] Raising {endorsement_type} Request...")
+        logger.info(f"Raising {endorsement_type} Request...")
         
-        # Map GraphQL type to raising type
         raising_type = {
             "POLICY_CORRECTION": "POLICY_CORRECTION",
             "ADDITION_OR_DELETION": "IND_POLICY_MEMBER_ADD/DELETE",
@@ -100,26 +93,14 @@ class TestEndorsementRejection:
                 "action": "Update"
             }
         }[endorsement_type]
-
-        mutation = """
-        mutation SaveEndorsementData($input: EndorsementData!) {
-          saveEndorsementData(input: $input) { requestTypeId }
-        }
-        """
-        mutation_input = {
-            "clientId": self.client_id,
-            "endorsementType": raising_type,
-            "policyId": working_policy["id"],
-            "endorsementRaisedFor": self.client_id,
-            "endorsementRaisedForClientType": "RETAIL_INDIVIDUAL",
-            "endorsementStatus": "Request Submitted",
-            "email": "test@example.com",
-            "mobileNumber": self.client_id,
-            "metadata": metadata
-        }
         
-        res = API_CLIENT.post_graphql(mutation, {"input": mutation_input})
-        print(f"DEBUG: raise_endorsement response: {res.text}")
+        res = EndorsementActions.raise_endorsement(
+            client_id=self.client_id,
+            policy_id=working_policy["id"],
+            endorsement_type=raising_type,
+            metadata=metadata,
+            email="test@example.com"
+        )
         assert res.status_code == 200, f"Failed to raise endorsement: {res.text}"
         res_json = res.json()
         assert "data" in res_json, "Response missing 'data' key"
@@ -128,23 +109,22 @@ class TestEndorsementRejection:
         assert isinstance(save_data, dict), "Expected saveEndorsementData to be a dictionary"
         ticket_id = save_data["requestTypeId"]
         assert ticket_id is not None, "saveEndorsementData missing 'requestTypeId'"
-        print(f"Endorsement Raised. Ticket ID: {ticket_id}")
+        logger.info(f"Endorsement Raised. Ticket ID: {ticket_id}")
 
-        print("Waiting 5 seconds for sync...")
+        logger.info("Waiting 5 seconds for sync...")
         time.sleep(5)
 
         # [STEP 3] Login as UNDERWRITER
-        print(f"\n[STEP 3] Login as UNDERWRITER ({self.uw_username})...")
+        logger.info(f"Login as UNDERWRITER ({self.uw_username})...")
         API_CLIENT.set_credentials(self.uw_username, self.uw_password)
         
         # Discover correct underwriter-side ticket ID using robust lookup
-        real_ticket_id = discover_underwriter_ticket_id(self.client_id, ticket_id)
+        real_ticket_id = EndorsementActions.discover_underwriter_ticket_id(self.client_id, ticket_id)
         assert real_ticket_id is not None, f"Could not discover underwriter-side ticket ID for request ID {ticket_id}"
-        print(f"Discovered Ticket ID for processing: {real_ticket_id}")
+        logger.info(f"Discovered Ticket ID for processing: {real_ticket_id}")
 
         # [STEP 4] Reject Endorsement
-        print(f"\n[STEP 4] Rejecting {endorsement_type} for Ticket: {real_ticket_id}...")
-        # Construct simplified requestDto for rejection
+        logger.info(f"Rejecting {endorsement_type} for Ticket: {real_ticket_id}...")
         request_dto = {
             "endorsementDetails": {
                 "endorsementType": endorsement_type,
@@ -155,7 +135,7 @@ class TestEndorsementRejection:
             }
         }
 
-        res = submit_endorsement(
+        res = EndorsementActions.submit_endorsement(
             ticket_id=real_ticket_id,
             request_dto=request_dto,
             endorsement_copy_path=self.file_path,
@@ -164,8 +144,4 @@ class TestEndorsementRejection:
 
         assert res.status_code == 200, f"Underwriter rejection failed: {res.text}"
         assert res.json().get("success") is True, f"Rejection result failure: {res.json()}"
-        print(f"Endorsement REJECTION Complete for {endorsement_type}!")
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+        logger.info(f"Endorsement REJECTION Complete for {endorsement_type}!")

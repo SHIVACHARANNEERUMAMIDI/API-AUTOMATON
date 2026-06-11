@@ -1,26 +1,26 @@
 import os
-import sys
 import pytest
-# Add current directory to path
-sys.path.append(os.getcwd())
-
 from utilities.api_client import API_CLIENT
-from dotenv import load_dotenv
+from utilities.customLogger import customLogger
 
-load_dotenv()
+logger = customLogger("TestLogin")
 
 @pytest.mark.login
 class TestLogin:
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_login(self):
         username = os.getenv("USER_USERNAME")
         password = os.getenv("USER_PASSWORD")
-        print(f"Testing login for {username}...")
+        if not username or not password:
+            raise ValueError("Mandatory environment variables USER_USERNAME or USER_PASSWORD are missing.")
+            
+        logger.info(f"Testing login for {username}...")
         API_CLIENT.set_credentials(username, password)
         headers = API_CLIENT._get_headers(include_auth=True)
         token = headers.get("Authorization", "")
+        
+        # Business validations
         assert token, "Login FAILED: No Authorization token in headers"
         assert token.startswith("Bearer "), "Token should start with Bearer prefix"
-        print(f"Token obtained successfully: {token[:20]}...")
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+        logger.info(f"Token obtained successfully and verified: {token[:30]}...")

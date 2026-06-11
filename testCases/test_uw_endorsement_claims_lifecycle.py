@@ -1,50 +1,38 @@
 import os
 import json
 import pytest
-import time
 from utilities.api_client import API_CLIENT
-from underwriter_api.claim_actions import update_claim_status
-from dotenv import load_dotenv
+from underwriter_api.claim_actions import ClaimActions
+from utilities.customLogger import customLogger
 
-load_dotenv()
+logger = customLogger("TestEndorsementClaimsLifecycle")
 
 @pytest.mark.endorsement
 class TestEndorsementClaimsLifecycle:
     @classmethod
     def setup_class(cls):
-        cls.client_id = os.getenv("TEST_CLIENT_ID", "919573464433")
+        cls.client_id = os.getenv("TEST_CLIENT_ID")
         cls.user_name = os.getenv("USER_USERNAME")
         cls.user_pass = os.getenv("USER_PASSWORD")
         cls.uw_user = os.getenv("UW_USERNAME")
         cls.uw_pass = os.getenv("UW_PASSWORD")
         
-        # Base file path for dummy documents
+        if not cls.client_id or not cls.user_name or not cls.user_pass or not cls.uw_user or not cls.uw_pass:
+            raise ValueError("Mandatory environment variables (TEST_CLIENT_ID, USER_USERNAME, USER_PASSWORD, UW_USERNAME, UW_PASSWORD) are missing.")
+        
         current_dir = os.path.dirname(os.path.abspath(__file__))
         automation_root = os.path.dirname(current_dir)
         cls.file_path = os.path.join(automation_root, "Data", "GoDigit Health Insurance 2.pdf")
+        if not os.path.exists(cls.file_path):
+            raise FileNotFoundError(f"Mock document not found at: {cls.file_path}")
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_user_raise_endorsement_claim(self):
-        print(f"\n[STEP 1] Login as USER ({self.user_name}) and fetching active policies...")
+        logger.info(f"Login as USER ({self.user_name}) and fetching active policies...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
         
-        # GraphQL Query: getPersonalPolicies
-        query = """
-        {
-          getPersonalPolicies(
-            clientId: "919573464433"
-            clientType: INDIVIDUAL
-            expiryType: ACTIVE
-          ) {
-            policies {
-              id
-              policyNumber
-              insuranceType
-              productSubType
-            }
-          }
-        }
-        """
-        res = API_CLIENT.post_graphql(query)
+        res = ClaimActions.get_personal_policies(self.client_id, client_type="INDIVIDUAL", expiry_type="ACTIVE")
         assert res.status_code == 200, f"Failed to fetch policies: {res.text}"
         policies = res.json().get("data", {}).get("getPersonalPolicies", {}).get("policies", [])
         assert len(policies) > 0, "No active policies found for the user."
@@ -53,10 +41,10 @@ class TestEndorsementClaimsLifecycle:
         policy_id = target_policy['id']
         insurance_type = target_policy.get('insuranceType', 'Health Insurance')
         product_sub_type = target_policy.get('productSubType', 'General')
-        print(f"Target Policy ID: {policy_id} | Type: {insurance_type}")
+        logger.info(f"Target Policy ID: {policy_id} | Type: {insurance_type}")
 
         # [STEP 2] Raise Claim (Endorsement)
-        print(f"[STEP 2] Raising Claim for Policy ID: {policy_id}...")
+        logger.info(f"Raising Claim for Policy ID: {policy_id}...")
         
         dto = {
             "clientId": self.client_id,
@@ -76,29 +64,20 @@ class TestEndorsementClaimsLifecycle:
             ]
         }
         
-        files = {}
         document_types = [
             "claimForm", "policyCopy", "medicalCertificate", "dischargeSummary", 
             "consolidatedBill", "breakUpBill", "cashReceipts", "investigationReports", "bankDetailsOfPayee"
         ]
         
-        with open(self.file_path, "rb") as f:
-            file_content = f.read()
-            for doc_type in document_types:
-                files[doc_type] = (f"{doc_type}.pdf", file_content, "application/pdf")
-            
-            # type and dto are @RequestPart in IndividualClaimsController
-            files["type"] = (None, "Submit", "application/json")
-            files["dto"] = (None, json.dumps(dto), "application/json")
-            
-            res = API_CLIENT.post_multipart("claims", files=files, data={})
+        claim_files = {doc_type: self.file_path for doc_type in document_types}
+        res = ClaimActions.raise_claim(dto, claim_files)
         
         assert res.status_code == 200, f"Claim submission failed: {res.text}"
         claim_data = res.json()
         assert isinstance(claim_data, dict), "Expected claim response to be a dictionary object"
         assert "id" in claim_data, "Claim response missing 'id' key"
         assert "status" in claim_data, "Claim response missing 'status' key"
-        print(f"Claim Submitted Successfully. Claim ID: {claim_data['id']}")
+        logger.info(f"Claim Submitted Successfully. Claim ID: {claim_data['id']}")
 
         # Save claim ID to state for UW processing
         state_path = os.path.join(os.path.dirname(self.file_path), "Logs", "last_endorsement_claim_state.json")
@@ -106,17 +85,17 @@ class TestEndorsementClaimsLifecycle:
         with open(state_path, "w") as f:
             json.dump({"last_endorsement_claim_id": str(claim_data['id'])}, f)
 
+    @pytest.mark.P0
+    @pytest.mark.Smoke
     def test_uw_approve_endorsement_claim(self):
         # [STEP 3] Login as UNDERWRITER and Search for the Claim
-        print(f"\n[STEP 3] Login as UNDERWRITER ({self.uw_user}) and searching for claim...")
+        logger.info(f"Login as UNDERWRITER ({self.uw_user}) and searching for claim...")
         API_CLIENT.set_credentials(self.uw_user, self.uw_pass)
         
-        # Get All Claims
-        res = API_CLIENT.get_rest("claims/getAllClaims", params={"page": 0, "size": 10})
+        res = ClaimActions.get_all_claims(page=0, size=10)
         assert res.status_code == 200, f"Failed to fetch claims: {res.text}"
         all_claims = res.json().get("content", [])
         
-        # Try to read claim ID from state
         state_path = os.path.join(os.path.dirname(self.file_path), "Logs", "last_endorsement_claim_state.json")
         target_claim_id = None
         if os.path.exists(state_path):
@@ -124,7 +103,6 @@ class TestEndorsementClaimsLifecycle:
                 state = json.load(f)
                 target_claim_id = state.get("last_endorsement_claim_id")
 
-        # Filter claims for our client
         target_claim = None
         for claim in all_claims:
             if target_claim_id and str(claim.get("id")) == target_claim_id:
@@ -134,16 +112,15 @@ class TestEndorsementClaimsLifecycle:
                 target_claim = claim
                 break
         
-        # Fallback to latest claim if none are pending
         if not target_claim:
              target_claim = next((claim for claim in all_claims if claim.get("clientId") == self.client_id), None)
 
         assert target_claim is not None, f"Could not find a claim for client {self.client_id} (Claim ID: {target_claim_id})"
         claim_id = target_claim['id']
-        print(f"Found Claim ID: {claim_id} | Status: {target_claim.get('status')}")
+        logger.info(f"Found Claim ID: {claim_id} | Status: {target_claim.get('status')}")
 
         # [STEP 4] Underwriter Approve Claim
-        print(f"\n[STEP 4] Approving Claim ID: {claim_id}...")
+        logger.info(f"Approving Claim ID: {claim_id}...")
         
         status_payload = {
             "status": "APPROVED",
@@ -162,20 +139,15 @@ class TestEndorsementClaimsLifecycle:
             ]
         }
         
-        # Hit statusUpdate endpoint
-        endpoint = f"claims/{claim_id}/statusUpdate"
-        res = API_CLIENT._request("PUT", f"{API_CLIENT.paisaplan_base.rstrip('/')}/{endpoint}", json=status_payload)
-        
+        res = ClaimActions.update_claim_status(claim_id, status_payload)
         assert res.status_code == 200, f"Claim approval failed: {res.text}"
-        print(f"Claim {claim_id} Approved Successfully.")
+        logger.info(f"Claim {claim_id} Approved Successfully.")
         
-        # [VERIFY] Final check
-        print("\n[VERIFY] Checking final status of the claim...")
-        res = API_CLIENT.get_rest("claims/getAllClaims", params={"page": 0, "size": 10})
+        # [VERIFY] Final check - Business validation
+        logger.info("Checking final status of the claim...")
+        res = ClaimActions.get_all_claims(page=0, size=10)
         all_claims_final = res.json().get("content", [])
         updated_claim = next((c for c in all_claims_final if c['id'] == claim_id), None)
+        assert updated_claim is not None, f"Could not find claim {claim_id} in final check"
         assert updated_claim['status'] == "APPROVED", f"Status mismatch! Expected APPROVED but got {updated_claim['status']}"
-        print(f"Verification Successful: Claim {claim_id} is now APPROVED.")
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+        logger.info(f"Verification Successful: Claim {claim_id} is now APPROVED.")
