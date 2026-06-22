@@ -1,39 +1,18 @@
 import json
 import os
 from utilities.api_client import API_CLIENT
+from underwriter_api.graphql.claim_queries import GET_PERSONAL_POLICIES_QUERY
 
 class ClaimActions:
     @staticmethod
     def get_personal_policies(client_id, client_type="INDIVIDUAL", expiry_type="ACTIVE"):
         """Fetch personal policies for a user via GraphQL."""
-        query = """
-        query getPersonalPolicies($clientId: String, $clientType: ClientType, $expiryType: ExpiryType) {
-          getPersonalPolicies(
-            clientId: $clientId
-            clientType: $clientType
-            expiryType: $expiryType
-            year: ""
-            insuranceType: ""
-            insuranceSubType: ""
-          ) {
-            totalPolicies
-            policies {
-              id
-              policyNumber
-              status
-              clientId
-              insuranceType
-              productSubType
-            }
-          }
-        }
-        """
         variables = {
             "clientId": client_id,
             "clientType": client_type,
             "expiryType": expiry_type
         }
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_PERSONAL_POLICIES_QUERY, variables)
 
     @staticmethod
     def raise_claim(dto, files, action_type="Submit"):
@@ -50,11 +29,11 @@ class ClaimActions:
                 f = open(path, "rb")
                 opened_files.append(f)
                 multipart_files[field] = (os.path.basename(path), f, "application/pdf")
-            
+
             # type and dto are @RequestPart in IndividualClaimsController
             multipart_files["type"] = (None, action_type, "application/json")
             multipart_files["dto"] = (None, json.dumps(dto), "application/json")
-            
+
             return API_CLIENT.post_multipart("claims", files=multipart_files, data={})
         finally:
             for f in opened_files:

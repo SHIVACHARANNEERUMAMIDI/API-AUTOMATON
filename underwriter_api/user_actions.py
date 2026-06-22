@@ -1,90 +1,44 @@
 import json
 import os
 from utilities.api_client import API_CLIENT
+from underwriter_api.graphql.user_queries import (
+    RM_CALLBACK_QUERY,
+    GET_PERSONAL_POLICIES_QUERY,
+    GET_PORTFOLIO_V2_QUERY,
+    GET_RISK_SCORE_QUERY,
+    GET_EXPIRED_POLICIES_YEAR_LIMIT_QUERY,
+    GET_CHILD_AND_PARENT_COMPANY_DETAILS_QUERY,
+    GET_INSURANCE_TYPE_DATA_QUERY,
+    GET_MASTER_DATA_QUERY,
+    GET_UNDERWRITER_TASKS_QUERY,
+)
+from underwriter_api.graphql.user_mutations import (
+    UPDATE_LOGIN_TIME_MUTATION,
+    SAVE_UNDERWRITER_TASK_MUTATION,
+)
 
 class UserActions:
     @staticmethod
     def rm_callback_request(name, email, phone, insurance_type):
         """Request a callback from an RM (Relationship Manager)."""
-        query = """
-        query RmCallbackRequest($name: String!, $email: String!, $phone: String!, $insuranceType: String!) {
-          rmCallbackRequest(
-            rmCallBackRequest: {
-              customerName: $name, 
-              customerEmailId: $email, 
-              customerMobileNo: $phone, 
-              insuranceType: $insuranceType
-            }
-          ) {
-            success
-            message
-          }
-        }
-        """
         variables = {
             "name": name,
             "email": email,
             "phone": phone,
             "insuranceType": insurance_type
         }
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(RM_CALLBACK_QUERY, variables)
 
     @staticmethod
     def get_personal_policies(client_id, client_type="INDIVIDUAL", expiry_type="ACTIVE", year="", insurance_type="", insurance_sub_type=""):
         """Fetch personal policies for a client."""
-        query = """
-        {
-          getPersonalPolicies(
-            clientId: "%s"
-            clientType: %s
-            expiryType: %s
-            year: "%s"
-            insuranceType: "%s"
-            insuranceSubType: "%s"
-          ) {
-            totalPolicies
-            totalPremiumAmount
-            activePolicies
-            policies {
-              id
-              policyNumber
-              status
-              companyName
-              insuranceType
-              productSubType
-              issuedOn
-              expiresOn
-            }
-          }
-        }
-        """ % (client_id, client_type, expiry_type, year, insurance_type, insurance_sub_type)
+        query = GET_PERSONAL_POLICIES_QUERY % (client_id, client_type, expiry_type, year, insurance_type, insurance_sub_type)
         return API_CLIENT.post_graphql(query)
 
     @staticmethod
     def get_portfolio_v2(client_id, client_type="RETAIL_INDIVIDUAL"):
         """Fetch client portfolio v2."""
-        query = """
-        {
-          getPortfolioV2(clientId: "%s", clientType: %s) {
-            ctc
-            overallSuggestions {
-              insuranceName
-              riskLevel
-            }
-            data {
-              insuranceMainName
-              company {
-                sumAssured
-                premium
-              }
-              personal {
-                sumAssured
-                premium
-              }
-            }
-          }
-        }
-        """ % (client_id, client_type)
+        query = GET_PORTFOLIO_V2_QUERY % (client_id, client_type)
         return API_CLIENT.post_graphql(query)
 
     @staticmethod
@@ -97,60 +51,23 @@ class UserActions:
         """
         Fetches risk score using getPortfolioV2 GraphQL query as the REST endpoint is 404.
         """
-        query = """
-        query getPortfolioV2($clientId: String!, $clientType: ClientType!) {
-          getPortfolioV2(clientId: $clientId, clientType: $clientType) {
-            riskScore {
-              healthInsurance { score }
-              lifeInsurance { score }
-            }
-          }
-        }
-        """
         variables = {
             "clientId": client_id,
             "clientType": "RETAIL_INDIVIDUAL"
         }
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_RISK_SCORE_QUERY, variables)
 
     @staticmethod
     def get_expired_policies_year_limit(client_id):
         """Fetch expired policies year limit."""
-        query = """
-        {
-          getExpiredPoliciesYearLimit(clientId: "%s") {
-            success
-            message
-            data {
-              expiredPolicyYearLimitMin
-              expiredPolicyYearLimitHigh
-            }
-          }
-        }
-        """ % client_id
+        query = GET_EXPIRED_POLICIES_YEAR_LIMIT_QUERY % client_id
         return API_CLIENT.post_graphql(query)
 
     @staticmethod
     def get_child_and_parent_company_details(client_id):
         """Fetch child and parent company details."""
-        query = """
-        query GetChildAndParentCompanyDetails($clientId: String!) {
-          getChildAndParentCompanyDetails(clientId: $clientId) {
-            parentCompanyDetails {
-              id
-              clientId
-              companyName
-            }
-            childCompanyDetailsList {
-              id
-              clientId
-              companyName
-            }
-          }
-        }
-        """
         variables = {"clientId": client_id}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_CHILD_AND_PARENT_COMPANY_DETAILS_QUERY, variables)
 
     @staticmethod
     def get_smart_advisory_tips():
@@ -160,15 +77,8 @@ class UserActions:
     @staticmethod
     def update_login_time(user_name):
         """Update login time for a user."""
-        query = """
-        mutation UpdateLoginTime($userName: String!) {
-          updateLoginTime(userName: $userName) {
-            loggedInAtLeastOnce
-          }
-        }
-        """
         variables = {"userName": user_name}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(UPDATE_LOGIN_TIME_MUTATION, variables)
 
     @staticmethod
     def get_logged_in_user_roles():
@@ -178,35 +88,14 @@ class UserActions:
     @staticmethod
     def get_insurance_type_data(client_type=None):
         """Fetch insurance type data."""
-        query = """
-        query GetInsuranceTypeData($clientType: PolicyHolderType) {
-          getInsuranceTypeData(clientType: $clientType) {
-            id
-            productType
-            insuranceType
-            subType
-            category
-          }
-        }
-        """
         variables = {"clientType": client_type}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_INSURANCE_TYPE_DATA_QUERY, variables)
 
     @staticmethod
     def get_master_data(data_types=["INSURANCETYPEDATA"]):
         """Fetch master data."""
-        query = """
-        query GetMasterData($input: [MasterDataType]!) {
-          getMasterData(input: $input) {
-            response {
-              dataType
-              data
-            }
-          }
-        }
-        """
         variables = {"input": data_types}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_MASTER_DATA_QUERY, variables)
 
     @staticmethod
     def register_retail_individual(first_name, last_name, email, mobile):
@@ -449,30 +338,11 @@ class UserActions:
     @staticmethod
     def get_underwriter_tasks(search, search_type="USERNAME", page=0, size=10):
         """Fetch tasks claimed/unclaimed under the Underwriter's view."""
-        query = """
-        query getUnderWriterTasks($search: String, $searchType: ClientSearchType, $page: NonNegativeInt!, $size: PositiveInt!) {
-          getUnderWriterTasks(search: $search, searchType: $searchType, page: $page, size: $size) {
-            content {
-              id
-              isClaimed
-              claimedBy {
-                userName
-              }
-              clientId
-            }
-          }
-        }
-        """
         variables = {"search": search, "searchType": search_type, "page": page, "size": size}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_UNDERWRITER_TASKS_QUERY, variables)
 
     @staticmethod
     def claim_underwriter_task(task_id, claim=True, status="IN_PROGRESS"):
         """Claim or update status of an Underwriter task."""
-        query = """
-        mutation saveUnderWriterTask($claim: Boolean, $id: String!, $status: UnderWriterTaskStatus) {
-          saveUnderWriterTask(claim: $claim, id: $id, status: $status) { id status }
-        }
-        """
         variables = {"claim": claim, "id": str(task_id), "status": status}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(SAVE_UNDERWRITER_TASK_MUTATION, variables)

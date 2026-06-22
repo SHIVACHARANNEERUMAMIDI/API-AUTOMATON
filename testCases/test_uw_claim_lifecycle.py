@@ -100,7 +100,8 @@ class TestClaimLifecycle:
         assert res.status_code == 200
         
         all_claims = res.json()
-        chats_list = all_claims if isinstance(all_claims, list) else all_claims.get("content", [])
+        # RC4: Renamed from chats_list to claims_list — variable holds claim records, not chat records
+        claims_list = all_claims if isinstance(all_claims, list) else all_claims.get("content", [])
         
         target_claim_id = None
         target_policy_id = None
@@ -111,7 +112,7 @@ class TestClaimLifecycle:
                 target_policy_id = state.get("last_claim_policy_id")
 
         found_claim = None
-        for c in chats_list:
+        for c in claims_list:
             if target_claim_id and str(c.get("id")) == target_claim_id:
                 found_claim = c
                 break

@@ -5,6 +5,7 @@ from underwriter_api.endorsement_actions import EndorsementActions
 from underwriter_api.user_actions import UserActions
 from utilities.api_client import API_CLIENT
 from utilities.customLogger import customLogger
+from utilities.config import Config
 
 logger = customLogger("TestEndorsementParity")
 
@@ -84,7 +85,7 @@ class TestEndorsementParity:
                 "policyId": policy['id'],
                 "policyNumber": policy.get("policyNumber"),
                 "clientId": self.client_id,
-                "clientName": "Anuj Mankumare",
+                "clientName": Config.USER_FULL_NAME,  # RC1: sourced from data/test_users.json
                 "companyName": self.client_id,
                 "insuranceType": policy['insuranceType'],
                 "productType": "GENERAL",

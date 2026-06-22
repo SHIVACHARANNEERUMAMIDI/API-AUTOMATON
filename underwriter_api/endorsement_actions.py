@@ -1,6 +1,11 @@
 import json
 import os
 from utilities.api_client import API_CLIENT
+from underwriter_api.graphql.endorsement_queries import (
+    GET_ENDORSEMENT_TICKETS_QUERY,
+    GET_ENDORSEMENT_TICKET_SAVED_DATA_QUERY,
+)
+from underwriter_api.graphql.endorsement_mutations import SAVE_ENDORSEMENT_DATA_MUTATION
 
 class EndorsementActions:
     @staticmethod
@@ -9,58 +14,6 @@ class EndorsementActions:
         GraphQL Query: GET_ENDORSEMENT_TICKETS_DATA
         Fetches endorsement tickets for the underwriter.
         """
-        query = """
-        query GET_ENDORSEMENT_TICKETS_DATA($page: Int, $size: Int, $filters: [EndorsementTicketFilter], $search: String, $endorsementTab: EndorsementTab) {
-          getEndorsementTickets(
-            page: $page
-            size: $size
-            filters: $filters
-            search: $search
-            endorsementTab: $endorsementTab
-          ) {
-            success
-            message
-            ticketsCounts {
-              totalTickets
-              addAndDelete
-              detailsCorrections
-              policyCorrections
-              completedTasks
-              rejectedTasks
-              pendingTickets
-            }
-            content {
-              id
-              clientId
-              clientName
-              userType
-              clientType
-              companyName
-              receivedDateTime
-              policyType
-              productSubType
-              createdBy {
-                id
-                userName
-                firstName
-                lastName
-              }
-              claimedBy {
-                id
-                userName
-                firstName
-                lastName
-              }
-              status
-            }
-            pageInfo {
-              currentPage
-              totalCount
-              totalPages
-            }
-          }
-        }
-        """
         variables = {
             "page": page,
             "size": size,
@@ -68,22 +21,13 @@ class EndorsementActions:
             "endorsementTab": endorsement_tab,
             "filters": []
         }
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_ENDORSEMENT_TICKETS_QUERY, variables)
 
     @staticmethod
     def raise_endorsement(client_id, policy_id, endorsement_type, metadata, email="test@example.com", mobile=None):
         """
         GraphQL Mutation: SaveEndorsementData
         Raises an endorsement request as a user.
-        """
-        mutation = """
-        mutation SaveEndorsementData($input: EndorsementData!) {
-          saveEndorsementData(input: $input) {
-            status
-            requestTypeId
-            serviceRequestId
-          }
-        }
         """
         variables = {
             "input": {
@@ -99,7 +43,7 @@ class EndorsementActions:
                 "metadata": metadata
             }
         }
-        return API_CLIENT.post_graphql(mutation, variables)
+        return API_CLIENT.post_graphql(SAVE_ENDORSEMENT_DATA_MUTATION, variables)
 
     @staticmethod
     def get_endorsement_ticket_saved_data(ticket_id):
@@ -107,46 +51,8 @@ class EndorsementActions:
         GraphQL Query: getEndorsementTicketSavedData
         Fetches detailed data for an endorsement ticket.
         """
-        query = """
-        query getEndorsementTicketSavedData($ticketId: Long!) {
-          getEndorsementTicketSavedData(ticketId: $ticketId) {
-            endorsementTicketView {
-              id
-              clientId
-              clientName
-              companyName
-              endorsementType
-              endorsementId
-              requestTypeId
-              serviceRequestId
-              documentType
-              documentUploadId
-              policyDetails {
-                policyId
-                policyNumber
-                insuranceType
-                productSubType
-                productType
-                sumInsured
-                premiumAmount
-                policyStartDate
-                policyEndDate
-                providerId
-                providerName
-              }
-              membersData {
-                id
-                firstName
-                lastName
-                relation
-                dateOfBirth
-              }
-            }
-          }
-        }
-        """
         variables = {"ticketId": int(ticket_id)}
-        return API_CLIENT.post_graphql(query, variables)
+        return API_CLIENT.post_graphql(GET_ENDORSEMENT_TICKET_SAVED_DATA_QUERY, variables)
 
     @staticmethod
     def submit_endorsement(ticket_id, request_dto, endorsement_copy_path=None, action="SUBMIT"):
@@ -156,10 +62,10 @@ class EndorsementActions:
         """
         if "endorsementDetails" not in request_dto:
             request_dto = {"endorsementDetails": request_dto}
-        
+
         if "cdAccountDetails" not in request_dto:
             request_dto["cdAccountDetails"] = {"cdAccountId": "", "cdAccountNumber": "", "cdBalance": ""}
-        
+
         if "employeeCountDetails" not in request_dto:
             request_dto["employeeCountDetails"] = {
                 "selfNewlyAdded": "", "dependentsNewlyAdded": "", "premiumPaid": "",
@@ -170,7 +76,7 @@ class EndorsementActions:
         # Construct multipart payload
         file_content = b"%PDF-1.4 dummy"
         filename = "dummy.pdf"
-        
+
         if endorsement_copy_path and os.path.exists(endorsement_copy_path):
             with open(endorsement_copy_path, "rb") as f:
                 file_content = f.read()
@@ -182,10 +88,10 @@ class EndorsementActions:
             "requestDto": (None, json.dumps(request_dto)),
             "endorsementCopy": (filename, file_content, "application/pdf")
         }
-            
+
         url = f"{API_CLIENT.paisaplan_base.rstrip('/')}/fileUpload/save"
         params = {"id": str(ticket_id)}
-        
+
         return API_CLIENT._request("POST", url, files=files, params=params)
 
     @staticmethod
@@ -196,17 +102,17 @@ class EndorsementActions:
         res = EndorsementActions.get_endorsement_tickets(search=client_id, endorsement_tab="PENDING")
         if res.status_code != 200:
             return None
-        
+
         tickets_data = res.json().get("data", {}).get("getEndorsementTickets", {})
         if not tickets_data:
             return None
-            
+
         tickets = tickets_data.get("content", [])
         if not isinstance(tickets, list):
             return None
-            
+
         client_tickets = [t for t in tickets if str(t.get("clientId")) == str(client_id)]
-        
+
         for t in client_tickets:
             t_id = t["id"]
             saved_res = EndorsementActions.get_endorsement_ticket_saved_data(t_id)
@@ -216,7 +122,7 @@ class EndorsementActions:
                     req_id = view.get("requestTypeId") or view.get("endorsementId")
                     if str(req_id) == str(request_id):
                         return t_id
-                        
+
         if client_tickets:
             return client_tickets[0]["id"]
         elif tickets:

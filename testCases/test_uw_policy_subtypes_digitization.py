@@ -108,4 +108,5 @@ class TestPolicySubtypesDigitization:
             "productType": "GENERAL",
             "status": "PENDING"
         }
-        return PolicyActions.create_policy_ticket(form_data, is_ticket_required="true", file_path=self.file_path)
+        # RC7: is_ticket_required is a Python bool; PolicyActions.create_policy_ticket converts it to string at the API boundary
+        return PolicyActions.create_policy_ticket(form_data, is_ticket_required=True, file_path=self.file_path)

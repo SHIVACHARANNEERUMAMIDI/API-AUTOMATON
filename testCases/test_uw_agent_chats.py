@@ -7,6 +7,9 @@ from utilities.customLogger import customLogger
 
 logger = customLogger("TestAgentChats")
 
+# Known-invalid chat ID used for the negative test (does not exist on the server)
+_INVALID_CHAT_ID = "INVALID_CHAT_ID_000000000000"
+
 @pytest.mark.agent
 class TestAgentChats:
     @classmethod
@@ -25,56 +28,68 @@ class TestAgentChats:
 
         logger.info("Fetching paged agent chats...")
         res = UserActions.get_agent_chats(page=0, size=5)
-        
+
+        # RC3: Business assertions are the primary checks; isinstance is a supporting check
         assert res.status_code == 200, f"Failed to fetch agent chats: {res.text}"
-        
+
         data = res.json()
-        logger.info(f"Agent Chats Response: {json.dumps(data, indent=2)}")
-        
-        assert isinstance(data, (dict, list)), "Response should be a JSON list or dictionary"
-        
-        if isinstance(data, dict):
-            assert "content" in data, "Response dictionary missing 'content' key"
-            chats = data["content"]
-            assert isinstance(chats, list), "Expected 'content' to be a list"
-        else:
-            chats = data
-            assert isinstance(chats, list), "Expected response to be a list"
+        assert "content" in data, "Response dictionary missing 'content' key"
+
+        chats = data["content"]
+        assert isinstance(chats, list), "Expected 'content' to be a list"
+
         logger.info(f"Discovered {len(chats)} agent chats in the current page.")
+
+    # ------------------------------------------------------------------ #
+    # RC2: Split positive and negative scenarios into separate test methods
+    # ------------------------------------------------------------------ #
 
     @pytest.mark.P1
     @pytest.mark.Regression
-    def test_get_agent_chat_by_id(self):
-        """Verify fetching an agent chat by a specific ID."""
+    def test_get_chat_by_valid_id(self):
+        """Positive test — verify fetching an agent chat by a real, dynamically discovered ID."""
         logger.info(f"Login as AGENT/UNDERWRITER ({self.user_name})...")
         API_CLIENT.set_credentials(self.user_name, self.user_pass)
 
         logger.info("Fetching list of chats to extract a dynamic ID...")
         res_list = UserActions.get_agent_chats(page=0, size=5)
-        chat_id_to_test = None
-        
-        if res_list.status_code == 200:
-            data = res_list.json()
-            chats = data.get("content", []) if isinstance(data, dict) else data
-            if chats and len(chats) > 0:
-                first_chat = chats[0]
-                chat_id_to_test = first_chat.get("id") or first_chat.get("chatId")
-                logger.info(f"Found dynamic Chat ID to test: {chat_id_to_test}")
+        assert res_list.status_code == 200, f"Pre-condition failed: could not list agent chats: {res_list.text}"
 
-        if not chat_id_to_test:
-            chat_id_to_test = "1505816378679222272"
-            logger.info(f"No active chats found in list. Falling back to specified Chat ID: {chat_id_to_test}")
+        data = res_list.json()
+        chats = data.get("content", []) if isinstance(data, dict) else data
+        assert len(chats) > 0, "No agent chats found — cannot run positive ID lookup test"
 
-        logger.info(f"Fetching agent chat by ID: {chat_id_to_test}...")
-        res = UserActions.get_agent_chat_by_id(chat_id_to_test)
-        
-        assert res.status_code in [200, 404], f"Unexpected status code from get_agent_chat_by_id: {res.status_code} ({res.text})"
-        
-        if res.status_code == 200:
-            chat_detail = res.json()
-            assert isinstance(chat_detail, dict), "Expected chat details to be a dictionary object"
-            # Business validation
-            assert "id" in chat_detail or "chatId" in chat_detail, "Chat detail missing identifier field"
-            logger.info(f"Successfully retrieved chat details:\n{json.dumps(chat_detail, indent=2)}")
-        else:
-            logger.info(f"Chat ID {chat_id_to_test} was not found on server (404), which is a valid API response for a non-existent ID.")
+        first_chat = chats[0]
+        chat_id = first_chat.get("id") or first_chat.get("chatId")
+        assert chat_id is not None, "First chat in list has no 'id' or 'chatId' field"
+        logger.info(f"Using dynamic Chat ID: {chat_id}")
+
+        logger.info(f"Fetching agent chat by ID: {chat_id}...")
+        res = UserActions.get_agent_chat_by_id(chat_id)
+
+        # RC3: Business assertions first — status, required fields, ID match
+        assert res.status_code == 200, f"Expected 200 for valid chat ID {chat_id}, got {res.status_code}: {res.text}"
+
+        chat_detail = res.json()
+        assert isinstance(chat_detail, dict), "Expected chat details to be a dictionary object"
+        assert "id" in chat_detail or "chatId" in chat_detail, "Chat detail missing identifier field"
+
+        returned_id = str(chat_detail.get("id") or chat_detail.get("chatId"))
+        assert returned_id == str(chat_id), \
+            f"Returned chat ID {returned_id} does not match requested ID {chat_id}"
+
+        logger.info(f"Successfully retrieved and validated chat details for ID {chat_id}.")
+
+    @pytest.mark.P1
+    @pytest.mark.Regression
+    def test_get_chat_by_invalid_id(self):
+        """Negative test — verify the API returns 404 for a non-existent chat ID."""
+        logger.info(f"Login as AGENT/UNDERWRITER ({self.user_name})...")
+        API_CLIENT.set_credentials(self.user_name, self.user_pass)
+
+        logger.info(f"Fetching agent chat with invalid ID: {_INVALID_CHAT_ID}...")
+        res = UserActions.get_agent_chat_by_id(_INVALID_CHAT_ID)
+
+        assert res.status_code == 404, \
+            f"Expected 404 for invalid chat ID '{_INVALID_CHAT_ID}', got {res.status_code}: {res.text}"
+        logger.info(f"Server correctly returned 404 for non-existent chat ID '{_INVALID_CHAT_ID}'.")

@@ -1,5 +1,10 @@
 import json
 from utilities.api_client import API_CLIENT
+from underwriter_api.graphql.policy_queries import (
+    GET_PERSONAL_POLICIES_QUERY,
+    GET_POLICY_DIGITALIZATION_TICKETS_QUERY,
+)
+from underwriter_api.graphql.policy_mutations import DELETE_POLICY_MUTATION
 
 class PolicyActions:
     @staticmethod
@@ -7,52 +12,27 @@ class PolicyActions:
         """
         GraphQL Query: getPersonalPolicies
         """
-        query = """
-        query getPersonalPolicies($clientId: String, $clientType: ClientType, $expiryType: ExpiryType) {
-          getPersonalPolicies(
-            clientId: $clientId
-            clientType: $clientType
-            expiryType: $expiryType
-          ) {
-            policies {
-              id
-              policyNumber
-              insuranceType
-              productSubType
-              issuedOn
-              expiresOn
-              otherInformation {
-                insuredName
-                city
-                state
-                address
-              }
-              provider {
-                id
-                name
-              }
-            }
-          }
-        }
-        """
         variables = {
             "clientId": client_id,
             "clientType": client_type,
             "expiryType": expiry_type
         }
-        return API_CLIENT.post_graphql(query, variables=variables)
+        return API_CLIENT.post_graphql(GET_PERSONAL_POLICIES_QUERY, variables=variables)
 
     @staticmethod
-    def create_policy_ticket(form_data, is_ticket_required="true", file_path=None):
+    def create_policy_ticket(form_data, is_ticket_required=True, file_path=None):
         """
         POST /paisaplan/policy/create-ticket
         Creates a policy digitalization ticket.
+
+        :param is_ticket_required: Python boolean. Converted to lowercase string at the
+                                   multipart form boundary to satisfy the API contract.
         """
         data = {
             "form": json.dumps(form_data),
-            "isTicketRequired": is_ticket_required
+            "isTicketRequired": str(is_ticket_required).lower()
         }
-        
+
         if file_path:
             with open(file_path, "rb") as f:
                 files = {"policyDocument": ("policy.pdf", f, "application/pdf")}
@@ -70,7 +50,7 @@ class PolicyActions:
             "policyDigitalizationForm": json.dumps(form_data),
             "addPolicyAction": action
         }
-        
+
         if file_path:
             with open(file_path, "rb") as f:
                 files = {"policyDocument": ("policy.pdf", f, "application/pdf")}
@@ -85,80 +65,13 @@ class PolicyActions:
         """
         GraphQL Mutation: deletePolicy
         """
-        query = """
-        mutation ($policyId: String!, $reason: String!) {
-          deletePolicy(policyId: $policyId, reason: $reason) {
-            message
-            success
-          }
-        }
-        """
         variables = {"policyId": policy_id, "reason": reason}
-        return API_CLIENT.post_graphql(query, variables=variables)
+        return API_CLIENT.post_graphql(DELETE_POLICY_MUTATION, variables=variables)
 
     @staticmethod
     def get_policy_digitalization_tickets(page=1, size=10, search="", policy_type=None):
         """
         GraphQL Query: getPolicyDigitalizationTicketsData
-        """
-        query = """
-        query ($page: NonNegativeInt!, $size: PositiveInt!, $sort: String, $sortField: String, $search: String, $policyType: String, $rmAssigned: String, $claimedBy: String, $taskStatus: TaskStatus, $policyDigitalizationTabs: PolicyDigitalizationTabs) {
-          getPolicyDigitalizationTicketsData(
-            page: $page
-            size: $size
-            sort: $sort
-            sortField: $sortField
-            search: $search
-            policyType: $policyType
-            rmAssigned: $rmAssigned
-            claimedBy: $claimedBy
-            taskStatus: $taskStatus
-            policyDigitalizationTabs: $policyDigitalizationTabs
-          ) {
-            success
-            message
-            content {
-              id
-              status
-              clientId
-              clientName
-              clientType
-              policyId
-              policyNumber
-              productType
-              productSubType
-              insuredName
-              insuranceType
-              sumInsured
-              policyStartDate
-              policyEndDate
-              premiumPaid
-              previousClaimedAmount
-              coverageTypes
-              individualCoverageTypes
-              agentComments
-              tpa
-              tpaUrl
-              location
-              branch
-              policyUploadedMethod
-              vehicleNumber
-              vehicleMakeModel
-              engineNumber
-              chassisNumber
-              yearOfManufacture
-              cc
-              individualSumInsured
-              vehicleIdv
-              seatingCapacity
-              fuelType
-              provider {
-                id
-                name
-              }
-            }
-          }
-        }
         """
         variables = {
             "page": page,
@@ -168,4 +81,4 @@ class PolicyActions:
             "policyType": policy_type,
             "policyDigitalizationTabs": "ALL"
         }
-        return API_CLIENT.post_graphql(query, variables=variables)
+        return API_CLIENT.post_graphql(GET_POLICY_DIGITALIZATION_TICKETS_QUERY, variables=variables)

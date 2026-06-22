@@ -6,6 +6,7 @@ from utilities.api_client import API_CLIENT
 from underwriter_api.policy_actions import PolicyActions
 from underwriter_api.endorsement_actions import EndorsementActions
 from utilities.customLogger import customLogger
+from utilities.config import Config
 
 logger = customLogger("TestEndorsementTicketsLifecycle")
 
@@ -158,7 +159,7 @@ class TestEndorsementTicketsLifecycle:
                 "intermediary": "AUTOMATION TEST",
                 "coverRange": "",
                 "policyHolderType": "RETAIL_INDIVIDUAL",
-                "clientName": "Anuj Mankumare",
+                "clientName": Config.USER_FULL_NAME,  # RC1: sourced from data/test_users.json
                 "companyName": self.client_id,
                 "clientId": self.client_id,
                 "policyId": working_policy['policy_id'],
@@ -182,7 +183,7 @@ class TestEndorsementTicketsLifecycle:
                 "policyCity": "",
                 "branch": "",
                 "policyAddress": "",
-                "insuredName": "Anuj Mankumare",
+                "insuredName": Config.USER_FULL_NAME,  # RC1: sourced from data/test_users.json
                 "vehicleNumber": "",
                 "vehicleMakeModel": "",
                 "noOfPermanentEmployees": "0",
